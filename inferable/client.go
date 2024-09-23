@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strings"
 )
 
 // Client represents an Inferable API client
 type Client struct {
-	endpoint string
-	secret   string
+	endpoint   string
+	secret     string
 	httpClient *http.Client
 }
 
@@ -23,17 +24,17 @@ func NewClient(endpoint, secret string) *Client {
 }
 
 type FetchDataOptions struct {
-	Path string
-	Headers map[string]string
+	Path        string
+	Headers     map[string]string
 	QueryParams map[string]string
-	Body string
-	Method string
+	Body        string
+	Method      string
 }
 
 // FetchData makes a request to the Inferable API and returns the response
 func (c *Client) FetchData(options FetchDataOptions) (string, error) {
 	fullURL := fmt.Sprintf("%s%s", c.endpoint, options.Path)
-	req, err := http.NewRequest(options.Method, fullURL, nil)
+	req, err := http.NewRequest(options.Method, fullURL, strings.NewReader(options.Body))
 	if err != nil {
 		return "", fmt.Errorf("error creating request: %v", err)
 	}
@@ -51,6 +52,11 @@ func (c *Client) FetchData(options FetchDataOptions) (string, error) {
 		q.Add(key, value)
 	}
 	req.URL.RawQuery = q.Encode()
+
+	// Set Content-Type header if body is not empty
+	if options.Body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
