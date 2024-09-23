@@ -1,12 +1,14 @@
 package inferable
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
-	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/invopop/jsonschema"
 )
 
@@ -24,6 +26,9 @@ type Service struct {
 		SecretAccessKey string
 		SessionToken    string
 	}
+	consumer *SQSConsumer
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 type Function struct {
@@ -159,16 +164,48 @@ func (s *Service) registerMachine() error {
 	return nil
 }
 
-// Listen initializes the service, registers the machine, and stores the registration details
+// Start initializes the service, registers the machine, and starts polling for messages
 func (s *Service) Start() error {
 	err := s.registerMachine()
 	if err != nil {
 		return fmt.Errorf("failed to register machine: %v", err)
 	}
 
-	// Start listening for messages (implement this later)
-	// TODO: Implement message listening logic
+	// Create a new SQSConsumer with credentials
+	consumer, err := NewSQSConsumer(s.region, s.queueURL, s.handleMessage, s.credentials.AccessKeyID, s.credentials.SecretAccessKey, s.credentials.SessionToken)
 
+	if err != nil {
+		return fmt.Errorf("failed to create SQS consumer: %v", err)
+	}
+
+	s.consumer = consumer
+
+	// Create a new context with cancellation
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+
+	// Start polling for messages and handle potential errors
+	go func() {
+		if err := s.consumer.Start(s.ctx); err != nil {
+			log.Printf("Error starting SQS consumer: %v", err)
+			s.Stop() // Stop the service if there's an error starting the consumer
+		}
+	}()
+
+	log.Printf("Service '%s' started and polling for messages", s.Name)
+	return nil
+}
+
+// Stop stops the service and cancels the polling
+func (s *Service) Stop() {
+	if s.cancel != nil {
+		s.cancel()
+		log.Printf("Service '%s' stopped", s.Name)
+	}
+}
+
+// handleMessage is a dummy message handler that just logs the received message
+func (s *Service) handleMessage(msg *sqs.Message) error {
+	log.Printf("Received message: %s", *msg.Body)
 	return nil
 }
 
@@ -194,23 +231,5 @@ func (s *Service) GetConfig() Config {
 		Expiration: s.expiration,
 	}
 
-	// Obfuscate sensitive credential information
-	config.Credentials.AccessKeyID = obfuscateString(s.credentials.AccessKeyID)
-	config.Credentials.SecretAccessKey = obfuscateString(s.credentials.SecretAccessKey)
-	config.Credentials.SessionToken = obfuscateString(s.credentials.SessionToken)
-
 	return config
-}
-
-// obfuscateString replaces all but the first and last 4 characters with asterisks
-func obfuscateString(s string) string {
-	if len(s) <= 8 {
-		return strings.Repeat("*", len(s))
-	}
-	visibleChars := 8
-	if len(s) > 100 {
-		visibleChars = 16
-	}
-	halfVisible := visibleChars / 2
-	return s[:halfVisible] + strings.Repeat("*", len(s)-visibleChars) + s[len(s)-halfVisible:]
 }

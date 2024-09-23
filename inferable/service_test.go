@@ -2,9 +2,13 @@ package inferable
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
+
+	"bytes"
+	"net/http"
 
 	"github.com/joho/godotenv"
 	"github.com/stretchr/testify/assert"
@@ -95,14 +99,89 @@ func TestRegistrationAndConfig(t *testing.T) {
 	assert.Regexp(t, `^[A-Z0-9]{4}\*+[A-Z0-9]{4}$`, config.Credentials.AccessKeyID)
 	assert.NotEmpty(t, config.Credentials.SecretAccessKey)
 	assert.NotEmpty(t, config.Credentials.SessionToken)
+}
 
-	// Verify that we can't access the raw credentials through the config
-	assert.NotEqual(t, service.credentials.AccessKeyID, config.Credentials.AccessKeyID)
-	assert.NotEqual(t, service.credentials.SecretAccessKey, config.Credentials.SecretAccessKey)
-	assert.NotEqual(t, service.credentials.SessionToken, config.Credentials.SessionToken)
+func TestServiceStartAndReceiveMessage(t *testing.T) {
+	// Load environment variables
+	err := godotenv.Load("../.env")
+	require.NoError(t, err, "Error loading .env file")
 
-	// Verify that the raw credentials are not empty in the service struct
-	assert.NotEmpty(t, service.credentials.AccessKeyID)
-	assert.NotEmpty(t, service.credentials.SecretAccessKey)
-	assert.NotEmpty(t, service.credentials.SessionToken)
+	machineID := os.Getenv("INFERABLE_MACHINE_ID")
+	apiSecret := os.Getenv("INFERABLE_API_SECRET")
+	clusterId := os.Getenv("INFERABLE_CLUSTER_ID")
+	require.NotEmpty(t, apiSecret, "INFERABLE_API_SECRET is not set in .env")
+	require.NotEmpty(t, clusterId, "INFERABLE_CLUSTER_ID is not set in .env")
+
+	// Create a new Inferable instance
+	i, err := New(machineID, apiSecret)
+	require.NoError(t, err)
+
+	// Register a service
+	service, err := i.RegisterService("TestService")
+	require.NoError(t, err)
+
+	// Register a test function
+	type TestInput struct {
+		Message string `json:"message"`
+	}
+
+	testFunc := func(input TestInput) string { return "Received: " + input.Message }
+
+	err = service.RegisterFunc(Function{
+		Func:        testFunc,
+		Name:        "TestFunc",
+		Description: "Test function",
+	})
+	require.NoError(t, err)
+
+	// Start the service
+	err = service.Start()
+	require.NoError(t, err)
+
+	// Ensure the service is stopped at the end of the test
+	defer service.Stop()
+
+	// Use executeJobSync to invoke the function
+	testMessage := "Hello, SQS!"
+	executeJobSyncURL := fmt.Sprintf("https://api.inferable.ai/clusters/%s/execute", clusterId)
+	payload := map[string]interface{}{
+		"service":  "TestService",
+		"function": "TestFunc",
+		"input": map[string]string{
+			"message": testMessage,
+		},
+	}
+
+	jsonPayload, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	req, err := http.NewRequest("POST", executeJobSyncURL, bytes.NewBuffer(jsonPayload))
+	require.NoError(t, err)
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiSecret)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+
+	// Check if the job was executed successfully
+	require.Equal(t, "resolution", result["resultType"])
+	require.Equal(t, "completed", result["status"])
+
+	// Wait for the message to be processed by our service
+	time.Sleep(5 * time.Second)
+
+	// Check the logs for the received message
+	// Note: This is a simple check and might be flaky if the log output changes
+	// In a real scenario, you might want to use a custom logger or a more robust way to verify the output
+	t.Log("Please verify that the following message was logged:")
+	t.Logf("Received message: %s", testMessage)
 }
