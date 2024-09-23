@@ -3,8 +3,11 @@ package inferable
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
+
+	"github.com/invopop/jsonschema"
 )
 
 type Service struct {
@@ -23,10 +26,42 @@ type Service struct {
 	}
 }
 
+type Function struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	Schema      interface{} `json:"schema,omitempty"`
+	Config      interface{}
+	Func        interface{}
+}
+
 func (s *Service) RegisterFunc(fn Function) error {
 	if _, exists := s.Functions[fn.Name]; exists {
 		return fmt.Errorf("function with name '%s' already registered for service '%s'", fn.Name, s.Name)
 	}
+
+	// Validate that the function has exactly one argument and it's a struct
+	fnType := reflect.TypeOf(fn.Func)
+	if fnType.NumIn() != 1 {
+		return fmt.Errorf("function '%s' must have exactly one argument", fn.Name)
+	}
+	argType := fnType.In(0)
+	if argType.Kind() != reflect.Struct {
+		return fmt.Errorf("function '%s' argument must be a struct", fn.Name)
+	}
+
+	// Get the schema for the input struct
+	reflector := jsonschema.Reflector{}
+	schema := reflector.Reflect(reflect.New(argType).Interface())
+
+	// Extract the relevant part of the schema
+	defs, ok := schema.Definitions[argType.Name()]
+	if !ok {
+		return fmt.Errorf("failed to find schema definition for %s", argType.Name())
+	}
+
+	// Add the generated schema to the function
+	fn.Schema = defs
+
 	s.Functions[fn.Name] = fn
 	return nil
 }
@@ -51,6 +86,11 @@ func (s *Service) registerMachine() error {
 
 	// Add registered functions to the payload
 	for _, fn := range s.Functions {
+		schemaJSON, err := json.Marshal(fn.Schema)
+		if err != nil {
+			return fmt.Errorf("failed to marshal schema for function '%s': %v", fn.Name, err)
+		}
+
 		payload.Functions = append(payload.Functions, struct {
 			Name        string `json:"name"`
 			Description string `json:"description,omitempty"`
@@ -58,7 +98,7 @@ func (s *Service) registerMachine() error {
 		}{
 			Name:        fn.Name,
 			Description: fn.Description,
-			Schema:      string(fn.Schema),
+			Schema:      string(schemaJSON),
 		})
 	}
 
@@ -167,5 +207,10 @@ func obfuscateString(s string) string {
 	if len(s) <= 8 {
 		return strings.Repeat("*", len(s))
 	}
-	return s[:4] + strings.Repeat("*", len(s)-8) + s[len(s)-4:]
+	visibleChars := 8
+	if len(s) > 100 {
+		visibleChars = 16
+	}
+	halfVisible := visibleChars / 2
+	return s[:halfVisible] + strings.Repeat("*", len(s)-visibleChars) + s[len(s)-halfVisible:]
 }
