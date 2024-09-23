@@ -16,7 +16,7 @@ import (
 )
 
 func TestRegisterFunc(t *testing.T) {
-	i, _ := New("", "test-secret")
+	i, _ := New("test-secret", "")
 	service, _ := i.RegisterService("TestService")
 
 	type TestInput struct {

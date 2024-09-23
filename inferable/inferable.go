@@ -37,7 +37,7 @@ type Inferable struct {
 
 // ... existing machineIDData struct and generateMachineID function ...
 
-func New(apiEndpoint, apiSecret string) (*Inferable, error) {
+func New(apiSecret, apiEndpoint string) (*Inferable, error) {
 	if apiEndpoint == "" {
 		apiEndpoint = DefaultAPIEndpoint
 	}
