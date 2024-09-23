@@ -12,10 +12,6 @@ import (
 
 const MachineIDFile = "inferable_machine_id.json"
 
-type machineIDData struct {
-	ID string `json:"id"`
-}
-
 func getMachineID() string {
 	hostname, _ := os.Hostname()
 	cpuInfo := runtime.GOARCH + runtime.GOOS + runtime.Version()

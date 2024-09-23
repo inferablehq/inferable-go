@@ -1,12 +1,14 @@
 package inferable
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
-	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/invopop/jsonschema"
 )
 
@@ -24,6 +26,9 @@ type Service struct {
 		SecretAccessKey string
 		SessionToken    string
 	}
+	consumer *SQSConsumer
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 type Function struct {
@@ -159,15 +164,215 @@ func (s *Service) registerMachine() error {
 	return nil
 }
 
-// Listen initializes the service, registers the machine, and stores the registration details
+// Start initializes the service, registers the machine, and starts polling for messages
 func (s *Service) Start() error {
 	err := s.registerMachine()
 	if err != nil {
 		return fmt.Errorf("failed to register machine: %v", err)
 	}
 
-	// Start listening for messages (implement this later)
-	// TODO: Implement message listening logic
+	// Create a new SQSConsumer with credentials
+	consumer, err := NewSQSConsumer(
+		s.region,
+		s.queueURL,
+		s.handleMessage,
+		s.credentials.AccessKeyID,
+		s.credentials.SecretAccessKey,
+		s.credentials.SessionToken,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create SQS consumer: %v", err)
+	}
+
+	s.consumer = consumer
+
+	// Create a new context with cancellation
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+
+	// Start polling for messages and handle potential errors
+	go func() {
+		if err := s.consumer.Start(s.ctx); err != nil {
+			log.Printf("Error starting SQS consumer: %v", err)
+			s.Stop() // Stop the service if there's an error starting the consumer
+		}
+	}()
+
+	log.Printf("Service '%s' started and polling for messages", s.Name)
+	return nil
+}
+
+// Stop stops the service and cancels the polling
+func (s *Service) Stop() {
+	if s.cancel != nil {
+		s.cancel()
+		log.Printf("Service '%s' stopped", s.Name)
+	}
+}
+
+// handleMessage is a dummy message handler that just logs the received message
+func (s *Service) handleMessage(msg *sqs.Message) error {
+	log.Printf("Received message: %s", *msg.Body)
+
+	// Define a struct to unmarshal the outer JSON structure
+	var outerPayload struct {
+		Value struct {
+			ID         string `json:"id"`
+			Service    string `json:"service"`
+			TargetFn   string `json:"targetFn"`
+			TargetArgs string `json:"targetArgs"` // Changed to string
+		} `json:"value"`
+	}
+
+	// Unmarshal the message body into the outer payload struct
+	if err := json.Unmarshal([]byte(*msg.Body), &outerPayload); err != nil {
+		return fmt.Errorf("failed to unmarshal message body: %v", err)
+	}
+
+	// Call acknowledgeJob
+	if err := s.acknowledgeJob(outerPayload.Value.ID); err != nil {
+		log.Printf("Failed to acknowledge job: %v", err)
+		// Continue processing the job even if acknowledgement fails
+	}
+
+	// Find the target function
+	fn, ok := s.Functions[outerPayload.Value.TargetFn]
+	if !ok {
+		return fmt.Errorf("function not found: %s", outerPayload.Value.TargetFn)
+	}
+
+	// Unmarshal the target arguments string into a map
+	var argsMap map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(outerPayload.Value.TargetArgs), &argsMap); err != nil {
+		return fmt.Errorf("failed to unmarshal target arguments: %v", err)
+	}
+
+	// Extract the "value" field from the argsMap
+	valueJSON, ok := argsMap["value"]
+	if !ok {
+		return fmt.Errorf("'value' field not found in target arguments")
+	}
+
+	// Create a new instance of the function's input type
+	fnType := reflect.TypeOf(fn.Func)
+	argType := fnType.In(0)
+	argPtr := reflect.New(argType)
+
+	// Unmarshal the value JSON into the function's input type
+	if err := json.Unmarshal(valueJSON, argPtr.Interface()); err != nil {
+		return fmt.Errorf("failed to unmarshal value into function argument: %v", err)
+	}
+
+	// Call the function with the unmarshaled argument
+	fnValue := reflect.ValueOf(fn.Func)
+	returnValues := fnValue.Call([]reflect.Value{argPtr.Elem()})
+
+	log.Printf("Function '%s' called successfully", fn.Name)
+
+	// Prepare the result
+	result, err := s.prepareResult(returnValues)
+	if err != nil {
+		return fmt.Errorf("failed to prepare result: %v", err)
+	}
+
+	// Persist the job result
+	if err := s.persistJobResult(outerPayload.Value.ID, result); err != nil {
+		return fmt.Errorf("failed to persist job result: %v", err)
+	}
+
+	return nil
+}
+
+func (s *Service) prepareResult(returnValues []reflect.Value) (struct {
+	Value string `json:"value"`
+	Type  string `json:"type"`
+}, error) {
+	var result struct {
+		Value string `json:"value"`
+		Type  string `json:"type"`
+	}
+
+	if len(returnValues) > 0 {
+		if errInterface, ok := returnValues[0].Interface().(error); ok {
+			if errInterface != nil {
+				result.Value = errInterface.Error()
+				result.Type = "rejection"
+			}
+		} else {
+			resultJSON, err := json.Marshal(returnValues[0].Interface())
+			if err != nil {
+				return result, fmt.Errorf("failed to marshal result: %v", err)
+			}
+			result.Value = string(resultJSON)
+			result.Type = "resolution"
+		}
+	}
+
+	return result, nil
+}
+
+func (s *Service) persistJobResult(jobID string, result struct {
+	Value string `json:"value"`
+	Type  string `json:"type"`
+}) error {
+	payload := struct {
+		Result                string `json:"result"`
+		ResultType            string `json:"resultType"`
+		FunctionExecutionTime *int64 `json:"functionExecutionTime,omitempty"`
+	}{
+		Result:     result.Value,
+		ResultType: result.Type,
+		// You can add function execution time here if you measure it
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload for persistJobResult: %v", err)
+	}
+
+	headers := map[string]string{
+		"Authorization":          "Bearer " + s.inferable.apiSecret,
+		"X-Machine-ID":           s.inferable.machineID,
+		"X-Machine-SDK-Version":  Version,
+		"X-Machine-SDK-Language": "go",
+	}
+
+	options := FetchDataOptions{
+		Path:    fmt.Sprintf("/jobs/%s/result", jobID),
+		Method:  "POST",
+		Headers: headers,
+		Body:    string(payloadJSON),
+	}
+
+	_, err = s.inferable.FetchData(options)
+	if err != nil {
+		return fmt.Errorf("failed to persist job result: %v", err)
+	}
+
+	return nil
+}
+
+// Add the new acknowledgeJob function
+func (s *Service) acknowledgeJob(jobID string) error {
+	// Prepare headers
+	headers := map[string]string{
+		"Authorization":          "Bearer " + s.inferable.apiSecret,
+		"X-Machine-ID":           s.inferable.machineID,
+		"X-Machine-SDK-Version":  Version,
+		"X-Machine-SDK-Language": "go",
+	}
+
+	// Call the acknowledgeJob endpoint
+	options := FetchDataOptions{
+		Path:    fmt.Sprintf("/jobs/%s", jobID),
+		Method:  "PUT",
+		Headers: headers,
+	}
+
+	_, err := s.inferable.FetchData(options)
+	if err != nil {
+		return fmt.Errorf("failed to acknowledge job: %v", err)
+	}
 
 	return nil
 }
@@ -194,23 +399,5 @@ func (s *Service) GetConfig() Config {
 		Expiration: s.expiration,
 	}
 
-	// Obfuscate sensitive credential information
-	config.Credentials.AccessKeyID = obfuscateString(s.credentials.AccessKeyID)
-	config.Credentials.SecretAccessKey = obfuscateString(s.credentials.SecretAccessKey)
-	config.Credentials.SessionToken = obfuscateString(s.credentials.SessionToken)
-
 	return config
-}
-
-// obfuscateString replaces all but the first and last 4 characters with asterisks
-func obfuscateString(s string) string {
-	if len(s) <= 8 {
-		return strings.Repeat("*", len(s))
-	}
-	visibleChars := 8
-	if len(s) > 100 {
-		visibleChars = 16
-	}
-	halfVisible := visibleChars / 2
-	return s[:halfVisible] + strings.Repeat("*", len(s)-visibleChars) + s[len(s)-halfVisible:]
 }

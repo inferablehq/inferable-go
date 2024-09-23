@@ -9,12 +9,20 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func echo(input string) string {
-	return input
+type EchoInput struct {
+	Input string
 }
 
-func reverse(input string) string {
-	runes := []rune(input)
+func echo(input EchoInput) string {
+	return input.Input
+}
+
+type ReverseInput struct {
+	Input string
+}
+
+func reverse(input ReverseInput) string {
+	runes := []rune(input.Input)
 	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
 		runes[i], runes[j] = runes[j], runes[i]
 	}
@@ -37,7 +45,7 @@ func TestInferableFunctions(t *testing.T) {
 	}
 
 	// Create a new Inferable instance
-	inferableInstance, err := inferable.New(apiEndpoint, apiSecret)
+	inferableInstance, err := inferable.New(apiSecret, apiEndpoint)
 	if err != nil {
 		t.Fatalf("Error creating Inferable instance: %v", err)
 	}
@@ -103,7 +111,7 @@ func TestInferableFunctions(t *testing.T) {
 
 	// Test the echo function
 	t.Run("Echo Function", func(t *testing.T) {
-		testInput := "Hello, Inferable!"
+		testInput := EchoInput{Input: "Hello, Inferable!"}
 		result, err := inferableInstance.CallFunc("string_operations", "echo", testInput)
 		if err != nil {
 			t.Fatalf("Error calling echo function: %v", err)
@@ -114,15 +122,14 @@ func TestInferableFunctions(t *testing.T) {
 		}
 
 		returnedString := result[0].Interface().(string)
-		if returnedString != testInput {
-			t.Errorf("Echo function returned incorrect result. Expected: %s, Got: %s", testInput, returnedString)
+		if returnedString != testInput.Input {
+			t.Errorf("Echo function returned incorrect result. Expected: %s, Got: %s", testInput.Input, returnedString)
 		}
 	})
 
 	// Test the reverse function
 	t.Run("Reverse Function", func(t *testing.T) {
-		testInput := "Hello, Inferable!"
-		expectedOutput := "!elbarefnI ,olleH"
+		testInput := ReverseInput{Input: "Hello, Inferable!"}
 		result, err := inferableInstance.CallFunc("string_operations", "reverse", testInput)
 		if err != nil {
 			t.Fatalf("Error calling reverse function: %v", err)
@@ -133,8 +140,8 @@ func TestInferableFunctions(t *testing.T) {
 		}
 
 		returnedString := result[0].Interface().(string)
-		if returnedString != expectedOutput {
-			t.Errorf("Reverse function returned incorrect result. Expected: %s, Got: %s", expectedOutput, returnedString)
+		if returnedString != "!elbarefnI ,olleH" {
+			t.Errorf("Reverse function returned incorrect result. Expected: %s, Got: %s", testInput.Input, returnedString)
 		}
 	})
 
@@ -159,14 +166,14 @@ func TestInferableFunctions(t *testing.T) {
 	// Test machine ID consistency
 	t.Run("Machine ID Consistency", func(t *testing.T) {
 		// Create first instance
-		instance1, err := inferable.New(apiEndpoint, apiSecret)
+		instance1, err := inferable.New(apiSecret, apiEndpoint)
 		if err != nil {
 			t.Fatalf("Error creating first Inferable instance: %v", err)
 		}
 		id1 := instance1.GetMachineID()
 
 		// Create second instance
-		instance2, err := inferable.New(apiEndpoint, apiSecret)
+		instance2, err := inferable.New(apiSecret, apiEndpoint)
 		if err != nil {
 			t.Fatalf("Error creating second Inferable instance: %v", err)
 		}

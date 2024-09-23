@@ -13,7 +13,7 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	i, err := New("", "test-secret")
+	i, err := New("test-secret", "")
 	require.NoError(t, err)
 	assert.Equal(t, DefaultAPIEndpoint, i.apiEndpoint)
 	assert.Equal(t, "test-secret", i.apiSecret)
@@ -21,7 +21,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestRegisterService(t *testing.T) {
-	i, _ := New("", "test-secret")
+	i, _ := New("test-secret", "")
 	service, err := i.RegisterService("TestService")
 	require.NoError(t, err)
 	assert.Equal(t, "TestService", service.Name)
@@ -32,7 +32,7 @@ func TestRegisterService(t *testing.T) {
 }
 
 func TestCallFunc(t *testing.T) {
-	i, _ := New("", "test-secret")
+	i, _ := New("test-secret", "")
 	service, _ := i.RegisterService("TestService")
 
 	testFunc := func(a, b int) int { return a + b }
@@ -51,7 +51,7 @@ func TestCallFunc(t *testing.T) {
 }
 
 func TestToJSONDefinition(t *testing.T) {
-	i, _ := New("", "test-secret")
+	i, _ := New("test-secret", "")
 	service, _ := i.RegisterService("TestService")
 
 	testFunc := func(a, b int) int { return a + b }
@@ -87,13 +87,13 @@ func TestServerOk(t *testing.T) {
 	}))
 	defer server.Close()
 
-	i, _ := New(server.URL, "test-secret")
+	i, _ := New("test-secret", server.URL)
 	err := i.ServerOk()
 	assert.NoError(t, err)
 }
 
 func TestGetMachineID(t *testing.T) {
-	i, _ := New("", "test-secret")
+	i, _ := New("test-secret", "")
 	machineID := i.GetMachineID()
 	assert.NotEmpty(t, machineID)
 
@@ -104,7 +104,7 @@ func TestGetMachineID(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create a new instance and check if the machine ID is the same
-	i2, _ := New("", "test-secret")
+	i2, _ := New("test-secret", "")
 	assert.Equal(t, machineID, i2.GetMachineID())
 }
 

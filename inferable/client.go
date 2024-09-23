@@ -69,7 +69,7 @@ func (c *Client) FetchData(options FetchDataOptions) (string, error) {
 		return "", fmt.Errorf("error reading response: %v", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("API error: %s (status code: %d)", string(body), resp.StatusCode)
 	}
 

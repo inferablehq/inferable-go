@@ -37,7 +37,7 @@ type Inferable struct {
 
 // ... existing machineIDData struct and generateMachineID function ...
 
-func New(apiEndpoint, apiSecret string) (*Inferable, error) {
+func New(apiSecret, apiEndpoint string) (*Inferable, error) {
 	if apiEndpoint == "" {
 		apiEndpoint = DefaultAPIEndpoint
 	}
@@ -126,7 +126,7 @@ func (i *Inferable) FetchData(options FetchDataOptions) ([]byte, error) {
 	if options.Headers == nil {
 		options.Headers = make(map[string]string)
 	}
-	if _, exists := options.Headers["Content-Type"]; !exists {
+	if _, exists := options.Headers["Content-Type"]; !exists && options.Body != "" {
 		options.Headers["Content-Type"] = "application/json"
 	}
 
