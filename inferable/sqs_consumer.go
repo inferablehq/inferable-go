@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 )
@@ -25,15 +26,24 @@ type SQSConsumer struct {
 
 // NewSQSConsumer creates a new SQS consumer
 func NewSQSConsumer(region, queueURL string, handler MessageHandler, accessKeyID, secretAccessKey, sessionToken string) (*SQSConsumer, error) {
+	// Create a new AWS session with the provided credentials
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(region),
+		Credentials: credentials.NewStaticCredentials(
+			accessKeyID,
+			secretAccessKey,
+			sessionToken,
+		),
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	// Create a new SQS client
+	sqsClient := sqs.New(sess)
+
 	return &SQSConsumer{
-		svc:            sqs.New(sess),
+		svc:            sqsClient,
 		queueURL:       queueURL,
 		handler:        handler,
 		pollInterval:   20 * time.Second, // Default to long polling

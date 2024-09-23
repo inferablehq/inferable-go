@@ -172,7 +172,14 @@ func (s *Service) Start() error {
 	}
 
 	// Create a new SQSConsumer with credentials
-	consumer, err := NewSQSConsumer(s.region, s.queueURL, s.handleMessage, s.credentials.AccessKeyID, s.credentials.SecretAccessKey, s.credentials.SessionToken)
+	consumer, err := NewSQSConsumer(
+		s.region,
+		s.queueURL,
+		s.handleMessage,
+		s.credentials.AccessKeyID,
+		s.credentials.SecretAccessKey,
+		s.credentials.SessionToken,
+	)
 
 	if err != nil {
 		return fmt.Errorf("failed to create SQS consumer: %v", err)
@@ -206,6 +213,125 @@ func (s *Service) Stop() {
 // handleMessage is a dummy message handler that just logs the received message
 func (s *Service) handleMessage(msg *sqs.Message) error {
 	log.Printf("Received message: %s", *msg.Body)
+
+	// Define a struct to unmarshal the outer JSON structure
+	var outerPayload struct {
+		Value struct {
+			ID         string `json:"id"`
+			Service    string `json:"service"`
+			TargetFn   string `json:"targetFn"`
+			TargetArgs string `json:"targetArgs"` // Changed to string
+		} `json:"value"`
+	}
+
+	// Unmarshal the message body into the outer payload struct
+	if err := json.Unmarshal([]byte(*msg.Body), &outerPayload); err != nil {
+		return fmt.Errorf("failed to unmarshal message body: %v", err)
+	}
+
+	// Check if the service name matches
+	if outerPayload.Value.Service != s.Name {
+		return fmt.Errorf("received message for wrong service: %s", outerPayload.Value.Service)
+	}
+
+	// Find the target function
+	fn, ok := s.Functions[outerPayload.Value.TargetFn]
+	if !ok {
+		return fmt.Errorf("function not found: %s", outerPayload.Value.TargetFn)
+	}
+
+	// Unmarshal the target arguments string into a map
+	var argsMap map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(outerPayload.Value.TargetArgs), &argsMap); err != nil {
+		return fmt.Errorf("failed to unmarshal target arguments: %v", err)
+	}
+
+	// Extract the "value" field from the argsMap
+	valueJSON, ok := argsMap["value"]
+	if !ok {
+		return fmt.Errorf("'value' field not found in target arguments")
+	}
+
+	// Create a new instance of the function's input type
+	fnType := reflect.TypeOf(fn.Func)
+	argType := fnType.In(0)
+	argPtr := reflect.New(argType)
+
+	// Unmarshal the value JSON into the function's input type
+	if err := json.Unmarshal(valueJSON, argPtr.Interface()); err != nil {
+		return fmt.Errorf("failed to unmarshal value into function argument: %v", err)
+	}
+
+	// Call the function with the unmarshaled argument
+	fnValue := reflect.ValueOf(fn.Func)
+	returnValues := fnValue.Call([]reflect.Value{argPtr.Elem()})
+
+	log.Printf("Function '%s' called successfully", fn.Name)
+
+	var result struct {
+		Value string `json:"value"`
+		Type  string `json:"type"`
+	}
+
+	// Check if the function returned a value
+	if len(returnValues) > 0 {
+		// Check if the returned value is of error type
+		if errInterface, ok := returnValues[0].Interface().(error); ok {
+			if errInterface != nil {
+				result.Value = errInterface.Error()
+				result.Type = "rejection"
+			}
+		} else {
+			// If it's not an error, marshal the result
+			resultJSON, err := json.Marshal(returnValues[0].Interface())
+			if err != nil {
+				result.Value = "Failed to marshal result"
+				result.Type = "rejection"
+			} else {
+				result.Value = string(resultJSON)
+				result.Type = "resolution"
+			}
+		}
+	}
+
+	// Prepare the payload for persistJobResult
+	payload := struct {
+		Result                string `json:"result"`
+		ResultType            string `json:"resultType"`
+		FunctionExecutionTime *int64 `json:"functionExecutionTime,omitempty"`
+	}{
+		Result:     result.Value,
+		ResultType: result.Type,
+		// You can add function execution time here if you measure it
+	}
+
+	// Marshal the payload
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload for persistJobResult: %v", err)
+	}
+
+	// Prepare headers
+	headers := map[string]string{
+		"Authorization":          "Bearer " + s.inferable.apiSecret,
+		"X-Machine-ID":           s.inferable.machineID,
+		"X-Machine-SDK-Version":  Version,
+		"X-Machine-SDK-Language": "go",
+	}
+
+	// Call the persistJobResult endpoint
+	options := FetchDataOptions{
+		Path:    fmt.Sprintf("/jobs/%s/result", outerPayload.Value.ID),
+		Method:  "POST",
+		Headers: headers,
+		Body:    string(payloadJSON),
+	}
+
+	_, err = s.inferable.FetchData(options)
+	if err != nil {
+		return fmt.Errorf("failed to persist job result: %v", err)
+	}
+
 	return nil
 }
 
