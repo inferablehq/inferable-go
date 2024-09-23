@@ -3,6 +3,7 @@ package inferable
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"math/rand"
 	"os"
 	"runtime"
@@ -32,7 +33,7 @@ func generateMachineID(length int) string {
 	}
 
 	r := rand.New(rand.NewSource(seed))
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	const charset = "abcdefghijklmnopqrstuvwxyz"
 
 	var sb strings.Builder
 	sb.Grow(length)
@@ -40,5 +41,5 @@ func generateMachineID(length int) string {
 		sb.WriteByte(charset[r.Intn(len(charset))])
 	}
 
-	return sb.String()
+	return fmt.Sprintf("go-%s", sb.String())
 }
