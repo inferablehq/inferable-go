@@ -174,14 +174,5 @@ func TestServiceStartAndReceiveMessage(t *testing.T) {
 
 	// Check if the job was executed successfully
 	require.Equal(t, "resolution", result["resultType"])
-	require.Equal(t, "completed", result["status"])
-
-	// Wait for the message to be processed by our service
-	time.Sleep(5 * time.Second)
-
-	// Check the logs for the received message
-	// Note: This is a simple check and might be flaky if the log output changes
-	// In a real scenario, you might want to use a custom logger or a more robust way to verify the output
-	t.Log("Please verify that the following message was logged:")
-	t.Logf("Received message: %s", testMessage)
+	require.Equal(t, "success", result["status"])
 }

@@ -229,9 +229,10 @@ func (s *Service) handleMessage(msg *sqs.Message) error {
 		return fmt.Errorf("failed to unmarshal message body: %v", err)
 	}
 
-	// Check if the service name matches
-	if outerPayload.Value.Service != s.Name {
-		return fmt.Errorf("received message for wrong service: %s", outerPayload.Value.Service)
+	// Call acknowledgeJob
+	if err := s.acknowledgeJob(outerPayload.Value.ID); err != nil {
+		log.Printf("Failed to acknowledge job: %v", err)
+		// Continue processing the job even if acknowledgement fails
 	}
 
 	// Find the target function
@@ -268,33 +269,52 @@ func (s *Service) handleMessage(msg *sqs.Message) error {
 
 	log.Printf("Function '%s' called successfully", fn.Name)
 
+	// Prepare the result
+	result, err := s.prepareResult(returnValues)
+	if err != nil {
+		return fmt.Errorf("failed to prepare result: %v", err)
+	}
+
+	// Persist the job result
+	if err := s.persistJobResult(outerPayload.Value.ID, result); err != nil {
+		return fmt.Errorf("failed to persist job result: %v", err)
+	}
+
+	return nil
+}
+
+func (s *Service) prepareResult(returnValues []reflect.Value) (struct {
+	Value string `json:"value"`
+	Type  string `json:"type"`
+}, error) {
 	var result struct {
 		Value string `json:"value"`
 		Type  string `json:"type"`
 	}
 
-	// Check if the function returned a value
 	if len(returnValues) > 0 {
-		// Check if the returned value is of error type
 		if errInterface, ok := returnValues[0].Interface().(error); ok {
 			if errInterface != nil {
 				result.Value = errInterface.Error()
 				result.Type = "rejection"
 			}
 		} else {
-			// If it's not an error, marshal the result
 			resultJSON, err := json.Marshal(returnValues[0].Interface())
 			if err != nil {
-				result.Value = "Failed to marshal result"
-				result.Type = "rejection"
-			} else {
-				result.Value = string(resultJSON)
-				result.Type = "resolution"
+				return result, fmt.Errorf("failed to marshal result: %v", err)
 			}
+			result.Value = string(resultJSON)
+			result.Type = "resolution"
 		}
 	}
 
-	// Prepare the payload for persistJobResult
+	return result, nil
+}
+
+func (s *Service) persistJobResult(jobID string, result struct {
+	Value string `json:"value"`
+	Type  string `json:"type"`
+}) error {
 	payload := struct {
 		Result                string `json:"result"`
 		ResultType            string `json:"resultType"`
@@ -305,13 +325,11 @@ func (s *Service) handleMessage(msg *sqs.Message) error {
 		// You can add function execution time here if you measure it
 	}
 
-	// Marshal the payload
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload for persistJobResult: %v", err)
 	}
 
-	// Prepare headers
 	headers := map[string]string{
 		"Authorization":          "Bearer " + s.inferable.apiSecret,
 		"X-Machine-ID":           s.inferable.machineID,
@@ -319,9 +337,8 @@ func (s *Service) handleMessage(msg *sqs.Message) error {
 		"X-Machine-SDK-Language": "go",
 	}
 
-	// Call the persistJobResult endpoint
 	options := FetchDataOptions{
-		Path:    fmt.Sprintf("/jobs/%s/result", outerPayload.Value.ID),
+		Path:    fmt.Sprintf("/jobs/%s/result", jobID),
 		Method:  "POST",
 		Headers: headers,
 		Body:    string(payloadJSON),
@@ -330,6 +347,31 @@ func (s *Service) handleMessage(msg *sqs.Message) error {
 	_, err = s.inferable.FetchData(options)
 	if err != nil {
 		return fmt.Errorf("failed to persist job result: %v", err)
+	}
+
+	return nil
+}
+
+// Add the new acknowledgeJob function
+func (s *Service) acknowledgeJob(jobID string) error {
+	// Prepare headers
+	headers := map[string]string{
+		"Authorization":          "Bearer " + s.inferable.apiSecret,
+		"X-Machine-ID":           s.inferable.machineID,
+		"X-Machine-SDK-Version":  Version,
+		"X-Machine-SDK-Language": "go",
+	}
+
+	// Call the acknowledgeJob endpoint
+	options := FetchDataOptions{
+		Path:    fmt.Sprintf("/jobs/%s", jobID),
+		Method:  "PUT",
+		Headers: headers,
+	}
+
+	_, err := s.inferable.FetchData(options)
+	if err != nil {
+		return fmt.Errorf("failed to acknowledge job: %v", err)
 	}
 
 	return nil
