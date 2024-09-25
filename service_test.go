@@ -53,11 +53,17 @@ func TestRegisterFunc(t *testing.T) {
 
 func TestRegistrationAndConfig(t *testing.T) {
 	// Load environment variables
-	err := godotenv.Load(".env")
-	require.NoError(t, err, "Error loading .env file")
+	if os.Getenv("INFERABLE_API_SECRET") == "" {
+		err := godotenv.Load("./.env")
 
-	machineID := os.Getenv("INFERABLE_MACHINE_ID")
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	apiSecret := os.Getenv("INFERABLE_API_SECRET")
+	machineID := "random-machine-id"
+
 	require.NotEmpty(t, apiSecret, "INFERABLE_API_SECRET is not set in .env")
 
 	// Create a new Inferable instance
@@ -104,13 +110,15 @@ func TestRegistrationAndConfig(t *testing.T) {
 }
 
 func TestServiceStartAndReceiveMessage(t *testing.T) {
-	// Load environment variables
-	err := godotenv.Load("./.env")
-	require.NoError(t, err, "Error loading .env file")
+	if os.Getenv("INFERABLE_API_SECRET") == "" {
+		err := godotenv.Load("./.env")
+		require.NoError(t, err, "Error loading .env file")
+	}
 
 	machineID := os.Getenv("INFERABLE_MACHINE_ID")
 	apiSecret := os.Getenv("INFERABLE_API_SECRET")
 	clusterId := os.Getenv("INFERABLE_CLUSTER_ID")
+
 	require.NotEmpty(t, apiSecret, "INFERABLE_API_SECRET is not set in .env")
 	require.NotEmpty(t, clusterId, "INFERABLE_CLUSTER_ID is not set in .env")
 
