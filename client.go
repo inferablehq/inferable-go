@@ -14,13 +14,22 @@ type Client struct {
 	httpClient *http.Client
 }
 
+type ClientOptions struct {
+	Endpoint string
+	Secret   string
+}
+
 // NewClient creates a new Inferable API client
-func NewClient(endpoint, secret string) *Client {
-	return &Client{
-		endpoint:   endpoint,
-		secret:     secret,
-		httpClient: &http.Client{},
+func NewClient(options ClientOptions) (*Client, error) {
+	if !strings.HasPrefix(options.Endpoint, "http://") && !strings.HasPrefix(options.Endpoint, "https://") {
+		return nil, fmt.Errorf("invalid URL: %s", options.Endpoint)
 	}
+
+	return &Client{
+		endpoint:   options.Endpoint,
+		secret:     options.Secret,
+		httpClient: &http.Client{},
+	}, nil
 }
 
 type FetchDataOptions struct {
@@ -31,9 +40,13 @@ type FetchDataOptions struct {
 	Method      string
 }
 
-// FetchData makes a request to the Inferable API and returns the response
 func (c *Client) FetchData(options FetchDataOptions) (string, error) {
 	fullURL := fmt.Sprintf("%s%s", c.endpoint, options.Path)
+
+	if !strings.HasPrefix(fullURL, "http://") && !strings.HasPrefix(fullURL, "https://") {
+		return "", fmt.Errorf("invalid URL: %s", fullURL)
+	}
+
 	req, err := http.NewRequest(options.Method, fullURL, strings.NewReader(options.Body))
 	if err != nil {
 		return "", fmt.Errorf("error creating request: %v", err)

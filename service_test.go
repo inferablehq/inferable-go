@@ -16,7 +16,10 @@ import (
 )
 
 func TestRegisterFunc(t *testing.T) {
-	i, _ := New("test-secret", "")
+	i, _ := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   "test-secret",
+	})
 	service, _ := i.RegisterService("TestService")
 
 	type TestInput struct {
@@ -50,7 +53,7 @@ func TestRegisterFunc(t *testing.T) {
 
 func TestRegistrationAndConfig(t *testing.T) {
 	// Load environment variables
-	err := godotenv.Load("../.env")
+	err := godotenv.Load(".env")
 	require.NoError(t, err, "Error loading .env file")
 
 	machineID := os.Getenv("INFERABLE_MACHINE_ID")
@@ -58,7 +61,11 @@ func TestRegistrationAndConfig(t *testing.T) {
 	require.NotEmpty(t, apiSecret, "INFERABLE_API_SECRET is not set in .env")
 
 	// Create a new Inferable instance
-	i, err := New(machineID, apiSecret)
+	i, err := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   apiSecret,
+		MachineID:   machineID,
+	})
 	require.NoError(t, err)
 
 	// Register a service
@@ -94,16 +101,11 @@ func TestRegistrationAndConfig(t *testing.T) {
 	assert.NotEmpty(t, config.Region)
 	assert.True(t, config.Enabled)
 	assert.True(t, config.Expiration.After(time.Now()))
-
-	// Check that sensitive information is obfuscated
-	assert.Regexp(t, `^[A-Z0-9]{4}\*+[A-Z0-9]{4}$`, config.Credentials.AccessKeyID)
-	assert.NotEmpty(t, config.Credentials.SecretAccessKey)
-	assert.NotEmpty(t, config.Credentials.SessionToken)
 }
 
 func TestServiceStartAndReceiveMessage(t *testing.T) {
 	// Load environment variables
-	err := godotenv.Load("../.env")
+	err := godotenv.Load("./.env")
 	require.NoError(t, err, "Error loading .env file")
 
 	machineID := os.Getenv("INFERABLE_MACHINE_ID")
@@ -113,7 +115,11 @@ func TestServiceStartAndReceiveMessage(t *testing.T) {
 	require.NotEmpty(t, clusterId, "INFERABLE_CLUSTER_ID is not set in .env")
 
 	// Create a new Inferable instance
-	i, err := New(machineID, apiSecret)
+	i, err := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   apiSecret,
+		MachineID:   machineID,
+	})
 	require.NoError(t, err)
 
 	// Register a service

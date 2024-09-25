@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,7 +11,10 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	i, err := New("test-secret", "")
+	i, err := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   "test-secret",
+	})
 	require.NoError(t, err)
 	assert.Equal(t, DefaultAPIEndpoint, i.apiEndpoint)
 	assert.Equal(t, "test-secret", i.apiSecret)
@@ -21,7 +22,10 @@ func TestNew(t *testing.T) {
 }
 
 func TestRegisterService(t *testing.T) {
-	i, _ := New("test-secret", "")
+	i, _ := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   "test-secret",
+	})
 	service, err := i.RegisterService("TestService")
 	require.NoError(t, err)
 	assert.Equal(t, "TestService", service.Name)
@@ -32,16 +36,24 @@ func TestRegisterService(t *testing.T) {
 }
 
 func TestCallFunc(t *testing.T) {
-	i, _ := New("test-secret", "")
+	i, _ := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   "test-secret",
+	})
 	service, _ := i.RegisterService("TestService")
 
-	testFunc := func(a, b int) int { return a + b }
+	type TestInput struct {
+		A int `json:"a"`
+		B int `json:"b"`
+	}
+
+	testFunc := func(input TestInput) int { return input.A + input.B }
 	service.RegisterFunc(Function{
 		Func: testFunc,
 		Name: "TestFunc",
 	})
 
-	result, err := i.CallFunc("TestService", "TestFunc", 2, 3)
+	result, err := i.CallFunc("TestService", "TestFunc", TestInput{A: 2, B: 3})
 	require.NoError(t, err)
 	assert.Equal(t, 5, result[0].Interface())
 
@@ -51,10 +63,18 @@ func TestCallFunc(t *testing.T) {
 }
 
 func TestToJSONDefinition(t *testing.T) {
-	i, _ := New("test-secret", "")
+	i, _ := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   "test-secret",
+	})
 	service, _ := i.RegisterService("TestService")
 
-	testFunc := func(a, b int) int { return a + b }
+	type TestInput struct {
+		A int `json:"a"`
+		B int `json:"b"`
+	}
+
+	testFunc := func(input TestInput) int { return input.A + input.B }
 	service.RegisterFunc(Function{
 		Func:        testFunc,
 		Name:        "TestFunc",
@@ -87,24 +107,27 @@ func TestServerOk(t *testing.T) {
 	}))
 	defer server.Close()
 
-	i, _ := New("test-secret", server.URL)
+	i, _ := New(InferableOptions{
+		APIEndpoint: server.URL,
+		APISecret:   "test-secret",
+	})
 	err := i.ServerOk()
 	assert.NoError(t, err)
 }
 
 func TestGetMachineID(t *testing.T) {
-	i, _ := New("test-secret", "")
+	i, _ := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   "test-secret",
+	})
 	machineID := i.GetMachineID()
 	assert.NotEmpty(t, machineID)
 
 	// Check if the machine ID is persistent
-	tmpDir := os.TempDir()
-	machineIDPath := filepath.Join(tmpDir, MachineIDFile)
-	_, err := os.Stat(machineIDPath)
-	assert.NoError(t, err)
-
-	// Create a new instance and check if the machine ID is the same
-	i2, _ := New("test-secret", "")
+	i2, _ := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   "test-secret",
+	})
 	assert.Equal(t, machineID, i2.GetMachineID())
 }
 

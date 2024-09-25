@@ -1,11 +1,10 @@
-package main
+package inferable
 
 import (
 	"encoding/json"
 	"os"
 	"testing"
 
-	"github.com/inferablehq/inferable-go/inferable"
 	"github.com/joho/godotenv"
 )
 
@@ -45,7 +44,10 @@ func TestInferableFunctions(t *testing.T) {
 	}
 
 	// Create a new Inferable instance
-	inferableInstance, err := inferable.New(apiSecret, apiEndpoint)
+	inferableInstance, err := New(InferableOptions{
+		APIEndpoint: apiEndpoint,
+		APISecret:   apiSecret,
+	})
 	if err != nil {
 		t.Fatalf("Error creating Inferable instance: %v", err)
 	}
@@ -81,7 +83,7 @@ func TestInferableFunctions(t *testing.T) {
 	}`)
 
 	// Register the echo function
-	err = service.RegisterFunc(inferable.Function{
+	err = service.RegisterFunc(Function{
 		Func:        echo,
 		Schema:      echoSchema,
 		Description: "Echoes the input string",
@@ -92,7 +94,7 @@ func TestInferableFunctions(t *testing.T) {
 	}
 
 	// Register the reverse function
-	err = service.RegisterFunc(inferable.Function{
+	err = service.RegisterFunc(Function{
 		Func:        reverse,
 		Schema:      reverseSchema,
 		Description: "Reverses the input string",
@@ -166,14 +168,20 @@ func TestInferableFunctions(t *testing.T) {
 	// Test machine ID consistency
 	t.Run("Machine ID Consistency", func(t *testing.T) {
 		// Create first instance
-		instance1, err := inferable.New(apiSecret, apiEndpoint)
+		instance1, err := New(InferableOptions{
+			APIEndpoint: apiEndpoint,
+			APISecret:   apiSecret,
+		})
 		if err != nil {
 			t.Fatalf("Error creating first Inferable instance: %v", err)
 		}
 		id1 := instance1.GetMachineID()
 
 		// Create second instance
-		instance2, err := inferable.New(apiSecret, apiEndpoint)
+		instance2, err := New(InferableOptions{
+			APIEndpoint: apiEndpoint,
+			APISecret:   apiSecret,
+		})
 		if err != nil {
 			t.Fatalf("Error creating second Inferable instance: %v", err)
 		}
