@@ -63,7 +63,7 @@ if err != nil {
 
 <details>
 
-<summary>👉 The Golang SDK for Inferable reflects the types from the input struct of the function. Read more about it here.</summary>
+<summary>👉 The Golang SDK for Inferable reflects the types from the input struct of the function.</summary>
 
 Unlike the TypeScript schema, the Golang SDK for Inferable reflects the types from the input struct of the function. It uses the [invopop/jsonschema](https://pkg.go.dev/github.com/invopop/jsonschema) library under the hood to generate JSON schemas from Go types through reflection.
 
