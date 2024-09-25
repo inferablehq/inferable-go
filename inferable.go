@@ -35,20 +35,33 @@ type Inferable struct {
 	machineID        string // New field for machine ID
 }
 
-// ... existing machineIDData struct and generateMachineID function ...
+type InferableOptions struct {
+	APIEndpoint string
+	APISecret   string
+	MachineID   string
+}
 
-func New(apiSecret, apiEndpoint string) (*Inferable, error) {
-	if apiEndpoint == "" {
-		apiEndpoint = DefaultAPIEndpoint
+func New(options InferableOptions) (*Inferable, error) {
+	if options.APIEndpoint == "" {
+		options.APIEndpoint = DefaultAPIEndpoint
 	}
-	client := NewClient(apiEndpoint, apiSecret)
+	client, err := NewClient(ClientOptions{
+		Endpoint: options.APIEndpoint,
+		Secret:   options.APISecret,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error creating client: %v", err)
+	}
 
-	machineID := generateMachineID(8)
+	machineID := options.MachineID
+	if machineID == "" {
+		machineID = generateMachineID(8)
+	}
 
 	return &Inferable{
 		client:           client,
-		apiEndpoint:      apiEndpoint,
-		apiSecret:        apiSecret,
+		apiEndpoint:      options.APIEndpoint,
+		apiSecret:        options.APISecret,
 		functionRegistry: FunctionRegistry{services: make(map[string]*Service)},
 		machineID:        machineID,
 	}, nil

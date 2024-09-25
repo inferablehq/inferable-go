@@ -1,11 +1,10 @@
-package main
+package inferable
 
 import (
 	"encoding/json"
 	"os"
 	"testing"
 
-	"github.com/inferablehq/inferable-go/inferable"
 	"github.com/joho/godotenv"
 )
 
@@ -30,13 +29,14 @@ func reverse(input ReverseInput) string {
 }
 
 func TestInferableFunctions(t *testing.T) {
-	// Load .env file
-	err := godotenv.Load()
-	if err != nil {
-		t.Fatalf("Error loading .env file: %v", err)
+	if os.Getenv("INFERABLE_API_SECRET") == "" {
+		err := godotenv.Load("./.env")
+
+		if err != nil {
+			panic(err)
+		}
 	}
 
-	// Get the API endpoint and secret from .env
 	apiEndpoint := os.Getenv("INFERABLE_API_ENDPOINT")
 	apiSecret := os.Getenv("INFERABLE_API_SECRET")
 
@@ -44,19 +44,19 @@ func TestInferableFunctions(t *testing.T) {
 		t.Fatal("INFERABLE_API_ENDPOINT or INFERABLE_API_SECRET not set in .env file")
 	}
 
-	// Create a new Inferable instance
-	inferableInstance, err := inferable.New(apiSecret, apiEndpoint)
+	inferableInstance, err := New(InferableOptions{
+		APIEndpoint: apiEndpoint,
+		APISecret:   apiSecret,
+	})
 	if err != nil {
 		t.Fatalf("Error creating Inferable instance: %v", err)
 	}
 
-	// Register the service
 	service, err := inferableInstance.RegisterService("string_operations")
 	if err != nil {
 		t.Fatalf("Error registering service: %v", err)
 	}
 
-	// Define the schema for the echo function
 	echoSchema := json.RawMessage(`{
 		"type": "object",
 		"properties": {
@@ -68,7 +68,6 @@ func TestInferableFunctions(t *testing.T) {
 		"required": ["input"]
 	}`)
 
-	// Define the schema for the reverse function
 	reverseSchema := json.RawMessage(`{
 		"type": "object",
 		"properties": {
@@ -80,8 +79,7 @@ func TestInferableFunctions(t *testing.T) {
 		"required": ["input"]
 	}`)
 
-	// Register the echo function
-	err = service.RegisterFunc(inferable.Function{
+	err = service.RegisterFunc(Function{
 		Func:        echo,
 		Schema:      echoSchema,
 		Description: "Echoes the input string",
@@ -91,8 +89,7 @@ func TestInferableFunctions(t *testing.T) {
 		t.Fatalf("Error registering echo function: %v", err)
 	}
 
-	// Register the reverse function
-	err = service.RegisterFunc(inferable.Function{
+	err = service.RegisterFunc(Function{
 		Func:        reverse,
 		Schema:      reverseSchema,
 		Description: "Reverses the input string",
@@ -102,14 +99,12 @@ func TestInferableFunctions(t *testing.T) {
 		t.Fatalf("Error registering reverse function: %v", err)
 	}
 
-	// Generate the JSON definition
 	jsonDef, err := inferableInstance.ToJSONDefinition()
 	if err != nil {
 		t.Fatalf("Error generating JSON definition: %v", err)
 	}
 	t.Logf("JSON Definition:\n%s\n", string(jsonDef))
 
-	// Test the echo function
 	t.Run("Echo Function", func(t *testing.T) {
 		testInput := EchoInput{Input: "Hello, Inferable!"}
 		result, err := inferableInstance.CallFunc("string_operations", "echo", testInput)
@@ -127,7 +122,6 @@ func TestInferableFunctions(t *testing.T) {
 		}
 	})
 
-	// Test the reverse function
 	t.Run("Reverse Function", func(t *testing.T) {
 		testInput := ReverseInput{Input: "Hello, Inferable!"}
 		result, err := inferableInstance.CallFunc("string_operations", "reverse", testInput)
@@ -145,7 +139,6 @@ func TestInferableFunctions(t *testing.T) {
 		}
 	})
 
-	// Test server health
 	t.Run("Server Health Check", func(t *testing.T) {
 		err := inferableInstance.ServerOk()
 		if err != nil {
@@ -154,7 +147,6 @@ func TestInferableFunctions(t *testing.T) {
 		t.Log("Server health check passed")
 	})
 
-	// Test machine ID generation
 	t.Run("Machine ID Generation", func(t *testing.T) {
 		machineID := inferableInstance.GetMachineID()
 		if machineID == "" {
@@ -163,17 +155,20 @@ func TestInferableFunctions(t *testing.T) {
 		t.Logf("Generated Machine ID: %s", machineID)
 	})
 
-	// Test machine ID consistency
 	t.Run("Machine ID Consistency", func(t *testing.T) {
-		// Create first instance
-		instance1, err := inferable.New(apiSecret, apiEndpoint)
+		instance1, err := New(InferableOptions{
+			APIEndpoint: apiEndpoint,
+			APISecret:   apiSecret,
+		})
 		if err != nil {
 			t.Fatalf("Error creating first Inferable instance: %v", err)
 		}
 		id1 := instance1.GetMachineID()
 
-		// Create second instance
-		instance2, err := inferable.New(apiSecret, apiEndpoint)
+		instance2, err := New(InferableOptions{
+			APIEndpoint: apiEndpoint,
+			APISecret:   apiSecret,
+		})
 		if err != nil {
 			t.Fatalf("Error creating second Inferable instance: %v", err)
 		}
