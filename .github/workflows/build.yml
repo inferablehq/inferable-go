@@ -11,6 +11,11 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
 
+    env:
+      INFERABLE_API_SECRET: ${{ secrets.INFERABLE_API_SECRET }}
+      INFERABLE_API_ENDPOINT: ${{ secrets.INFERABLE_API_ENDPOINT }}
+      INFERABLE_CLUSTER_ID: ${{ secrets.INFERABLE_CLUSTER_ID }}
+
     steps:
       - name: Check out code
         uses: actions/checkout@v3
