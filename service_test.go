@@ -90,7 +90,6 @@ func TestRegistrationAndConfig(t *testing.T) {
 		Func:        testFunc,
 		Name:        "TestFunc",
 		Description: "Test function",
-		Schema:      json.RawMessage(`{"input": {"a": "int", "b": "int"}, "output": "int"}`),
 	})
 
 	require.NoError(t, err)

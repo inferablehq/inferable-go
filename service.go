@@ -32,9 +32,9 @@ type Service struct {
 }
 
 type Function struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description,omitempty"`
-	Schema      interface{} `json:"schema,omitempty"`
+	Name        string
+	Description string
+	schema      interface{}
 	Config      interface{}
 	Func        interface{}
 }
@@ -64,8 +64,8 @@ func (s *Service) RegisterFunc(fn Function) error {
 		return fmt.Errorf("failed to find schema definition for %s", argType.Name())
 	}
 
-	// Add the generated schema to the function
-	fn.Schema = defs
+	defs.AdditionalProperties = nil
+	fn.schema = defs
 
 	s.Functions[fn.Name] = fn
 	return nil
@@ -91,7 +91,7 @@ func (s *Service) registerMachine() error {
 
 	// Add registered functions to the payload
 	for _, fn := range s.Functions {
-		schemaJSON, err := json.Marshal(fn.Schema)
+		schemaJSON, err := json.Marshal(fn.schema)
 		if err != nil {
 			return fmt.Errorf("failed to marshal schema for function '%s': %v", fn.Name, err)
 		}
@@ -400,4 +400,21 @@ func (s *Service) GetConfig() Config {
 	}
 
 	return config
+}
+
+func (s *Service) GetSchema() (map[string]interface{}, error) {
+	if len(s.Functions) == 0 {
+		return nil, fmt.Errorf("no functions registered for service '%s'", s.Name)
+	}
+
+	schema := make(map[string]interface{})
+
+	for _, fn := range s.Functions {
+		schema[fn.Name] = map[string]interface{}{
+			"input": fn.schema,
+			"name":  fn.Name,
+		}
+	}
+
+	return schema, nil
 }

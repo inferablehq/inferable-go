@@ -14,15 +14,6 @@ const (
 	DefaultAPIEndpoint = "https://api.inferable.ai"
 )
 
-func (f *Function) SetSchema(schema interface{}) error {
-	schemaJSON, err := json.Marshal(schema)
-	if err != nil {
-		return fmt.Errorf("failed to marshal schema: %v", err)
-	}
-	f.Schema = json.RawMessage(schemaJSON)
-	return nil
-}
-
 type FunctionRegistry struct {
 	services map[string]*Service
 }
@@ -120,7 +111,7 @@ func (i *Inferable) ToJSONDefinition() ([]byte, error) {
 			funcDef := map[string]interface{}{
 				"name":        function.Name,
 				"description": function.Description,
-				"schema":      function.Schema,
+				"schema":      function.schema,
 			}
 			functions = append(functions, funcDef)
 		}

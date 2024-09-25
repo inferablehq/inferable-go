@@ -79,7 +79,6 @@ func TestToJSONDefinition(t *testing.T) {
 		Func:        testFunc,
 		Name:        "TestFunc",
 		Description: "Test function",
-		Schema:      json.RawMessage(`{"input": {"a": "int", "b": "int"}, "output": "int"}`),
 	})
 
 	jsonDef, err := i.ToJSONDefinition()
@@ -131,4 +130,77 @@ func TestGetMachineID(t *testing.T) {
 	assert.Equal(t, machineID, i2.GetMachineID())
 }
 
-// Add more tests as needed for other functions like FetchData, Start, etc.
+func TestGetSchema(t *testing.T) {
+	i, _ := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   "test-secret",
+	})
+	service, _ := i.RegisterService("TestService")
+
+	type TestInput struct {
+		A int `json:"a"`
+		B int `json:"b"`
+	}
+
+	testFunc := func(input TestInput) int { return input.A + input.B }
+	service.RegisterFunc(Function{
+		Func: testFunc,
+		Name: "TestFunc",
+	})
+
+	type TestInput2 struct {
+		C struct {
+			D int   `json:"d"`
+			E []int `json:"e"`
+		} `json:"c"`
+	}
+
+	testFunc2 := func(input TestInput2) int { return input.C.D * 2 }
+	service.RegisterFunc(Function{
+		Func: testFunc2,
+		Name: "TestFunc2",
+	})
+
+	schema, err := service.GetSchema()
+	require.NoError(t, err)
+	assert.Equal(t, "TestFunc", schema["TestFunc"].(map[string]interface{})["name"])
+	assert.Equal(t, "TestFunc2", schema["TestFunc2"].(map[string]interface{})["name"])
+
+	// Marshal the schema to JSON and assert it as a string
+	schemaJSON, err := json.Marshal(schema)
+	require.NoError(t, err)
+	assert.NotEmpty(t, string(schemaJSON))
+
+	expectedJSON := `{
+        "TestFunc": {
+            "name": "TestFunc",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "a": {"type": "integer"},
+                    "b": {"type": "integer"}
+                },
+                "required": ["a", "b"]
+            }
+        },
+        "TestFunc2": {
+            "name": "TestFunc2",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "c": {
+                        "type": "object",
+                        "properties": {
+                            "d": {"type": "integer"},
+                            "e": {"type": "array", "items": {"type": "integer"}}
+                        },
+                        "additionalProperties": false,
+                        "required": ["d", "e"]
+                    }
+                },
+                "required": ["c"]
+            }
+        }
+    }`
+	assert.JSONEq(t, expectedJSON, string(schemaJSON))
+}

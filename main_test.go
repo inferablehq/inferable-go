@@ -1,7 +1,6 @@
 package inferable
 
 import (
-	"encoding/json"
 	"os"
 	"testing"
 
@@ -57,31 +56,8 @@ func TestInferableFunctions(t *testing.T) {
 		t.Fatalf("Error registering service: %v", err)
 	}
 
-	echoSchema := json.RawMessage(`{
-		"type": "object",
-		"properties": {
-			"input": {
-				"type": "string",
-				"description": "The string to be echoed"
-			}
-		},
-		"required": ["input"]
-	}`)
-
-	reverseSchema := json.RawMessage(`{
-		"type": "object",
-		"properties": {
-			"input": {
-				"type": "string",
-				"description": "The string to be reversed"
-			}
-		},
-		"required": ["input"]
-	}`)
-
 	err = service.RegisterFunc(Function{
 		Func:        echo,
-		Schema:      echoSchema,
 		Description: "Echoes the input string",
 		Name:        "echo",
 	})
@@ -91,7 +67,6 @@ func TestInferableFunctions(t *testing.T) {
 
 	err = service.RegisterFunc(Function{
 		Func:        reverse,
-		Schema:      reverseSchema,
 		Description: "Reverses the input string",
 		Name:        "reverse",
 	})
