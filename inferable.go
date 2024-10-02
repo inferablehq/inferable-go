@@ -58,6 +58,11 @@ func New(options InferableOptions) (*Inferable, error) {
 	}, nil
 }
 
+// Convenience reference to a service with name 'default'.
+func (i *Inferable) DefaultService() (*Service, error) {
+  return i.RegisterService("default")
+}
+
 func (i *Inferable) RegisterService(serviceName string) (*Service, error) {
 	if _, exists := i.functionRegistry.services[serviceName]; exists {
 		return nil, fmt.Errorf("service with name '%s' already registered", serviceName)
