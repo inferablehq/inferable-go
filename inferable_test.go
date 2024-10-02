@@ -36,6 +36,22 @@ func TestRegisterService(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestRegisterDefaultService(t *testing.T) {
+	i, _ := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   "test-secret",
+	})
+	service, err := i.DefaultService()
+	require.NoError(t, err)
+	assert.Equal(t, "default", service.Name)
+
+  // Fetch the 'default' service again
+  service2, err := i.DefaultService()
+  require.NoError(t, err)
+  // should return the same service reference
+  assert.Same(t, service, service2)
+}
+
 func TestCallFunc(t *testing.T) {
 	i, _ := New(InferableOptions{
 		APIEndpoint: DefaultAPIEndpoint,

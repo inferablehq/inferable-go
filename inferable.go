@@ -107,7 +107,11 @@ func (i *Inferable) pingCluster() {
 
 // Convenience reference to a service with name 'default'.
 func (i *Inferable) DefaultService() (*Service, error) {
-  return i.RegisterService("default")
+	if _, exists := i.functionRegistry.services["default"]; exists {
+		return i.functionRegistry.services["default"], nil
+	}
+
+	return i.RegisterService("default")
 }
 
 func (i *Inferable) RegisterService(serviceName string) (*Service, error) {
