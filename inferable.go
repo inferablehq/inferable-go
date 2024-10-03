@@ -8,7 +8,7 @@ import (
 )
 
 // Version of the inferable package
-const Version = "0.1.3"
+const Version = "0.1.4"
 
 const (
 	DefaultAPIEndpoint = "https://api.inferable.ai"
