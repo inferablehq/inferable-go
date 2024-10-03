@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/service/sqs"
@@ -58,10 +59,23 @@ func (s *Service) RegisterFunc(fn Function) error {
 	reflector := jsonschema.Reflector{}
 	schema := reflector.Reflect(reflect.New(argType).Interface())
 
+	if schema == nil {
+		return fmt.Errorf("failed to get schema for function '%s'", fn.Name)
+	}
+
 	// Extract the relevant part of the schema
 	defs, ok := schema.Definitions[argType.Name()]
 	if !ok {
 		return fmt.Errorf("failed to find schema definition for %s", argType.Name())
+	}
+
+	defsString, err := json.Marshal(defs)
+	if err != nil {
+		return fmt.Errorf("failed to marshal schema for function '%s': %v", fn.Name, err)
+	}
+
+	if strings.Contains(string(defsString), "\"$ref\":\"#/$defs") {
+		return fmt.Errorf("schema for function '%s' contains a $ref to an external definition. this is currently not supported. see https://go.inferable.ai/go-schema-limitation for details", fn.Name)
 	}
 
 	defs.AdditionalProperties = nil

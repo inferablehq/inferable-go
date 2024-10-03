@@ -82,6 +82,11 @@ func TestRegistrationAndConfig(t *testing.T) {
 	type TestInput struct {
 		A int `json:"a"`
 		B int `json:"b"`
+		C []struct {
+			D int           `json:"d"`
+			E string        `json:"e"`
+			F []interface{} `json:"f"`
+		} `json:"c"`
 	}
 
 	testFunc := func(input TestInput) int { return input.A + input.B }
@@ -106,6 +111,59 @@ func TestRegistrationAndConfig(t *testing.T) {
 	assert.NotEmpty(t, config.Region)
 	assert.True(t, config.Enabled)
 	assert.True(t, config.Expiration.After(time.Now()))
+}
+
+func TestErrorneousRegistration(t *testing.T) {
+	// Load environment variables
+	if os.Getenv("INFERABLE_API_SECRET") == "" {
+		err := godotenv.Load("./.env")
+
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	apiSecret := os.Getenv("INFERABLE_API_SECRET")
+	machineID := "random-machine-id"
+
+	require.NotEmpty(t, apiSecret, "INFERABLE_API_SECRET is not set in .env")
+
+	// Create a new Inferable instance
+	i, err := New(InferableOptions{
+		APIEndpoint: os.Getenv("INFERABLE_API_ENDPOINT"),
+		APISecret:   apiSecret,
+		MachineID:   machineID,
+	})
+	require.NoError(t, err)
+
+	// Register a service
+	service, err := i.RegisterService("TestService")
+	require.NoError(t, err)
+
+	type F struct {
+		G int `json:"g"`
+	}
+
+	// Register a test function
+	type TestInput struct {
+		A int `json:"a"`
+		B int `json:"b"`
+		C []struct {
+			D int    `json:"d"`
+			E string `json:"e"`
+			F []F    `json:"f"`
+		} `json:"c"`
+	}
+
+	testFunc := func(input TestInput) int { return input.A + input.B }
+
+	err = service.RegisterFunc(Function{
+		Func:        testFunc,
+		Name:        "TestFunc",
+		Description: "Test function",
+	})
+
+	require.ErrorContains(t, err, "schema for function 'TestFunc' contains a $ref to an external definition. this is currently not supported.")
 }
 
 func TestServiceStartAndReceiveMessage(t *testing.T) {
