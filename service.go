@@ -321,7 +321,7 @@ func (s *Service) persistJobResult(jobID string, result struct {
 		ResultType            string `json:"resultType"`
 		FunctionExecutionTime int64  `json:"functionExecutionTime,omitempty"`
 	}{
-		Result:                fmt.Sprintf("{\"value\": \"%s\" }", result.Value),
+		Result:                fmt.Sprintf("{\"value\": %s }", result.Value),
 		ResultType:            result.Type,
 		FunctionExecutionTime: duration.Milliseconds(),
 	}
