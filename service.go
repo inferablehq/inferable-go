@@ -269,6 +269,7 @@ func (s *Service) handleMessage(msg *sqs.Message) error {
 
 	log.Printf("Function '%s' called successfully", fn.Name)
 
+	start := time.Now()
 	// Prepare the result
 	result, err := s.prepareResult(returnValues)
 	if err != nil {
@@ -276,7 +277,7 @@ func (s *Service) handleMessage(msg *sqs.Message) error {
 	}
 
 	// Persist the job result
-	if err := s.persistJobResult(outerPayload.Value.ID, result); err != nil {
+	if err := s.persistJobResult(outerPayload.Value.ID, result, time.Since(start)); err != nil {
 		return fmt.Errorf("failed to persist job result: %v", err)
 	}
 
@@ -314,15 +315,15 @@ func (s *Service) prepareResult(returnValues []reflect.Value) (struct {
 func (s *Service) persistJobResult(jobID string, result struct {
 	Value string `json:"value"`
 	Type  string `json:"type"`
-}) error {
+}, duration time.Duration) error {
 	payload := struct {
 		Result                string `json:"result"`
 		ResultType            string `json:"resultType"`
-		FunctionExecutionTime *int64 `json:"functionExecutionTime,omitempty"`
+		FunctionExecutionTime int64  `json:"functionExecutionTime,omitempty"`
 	}{
-		Result:     result.Value,
-		ResultType: result.Type,
-		// You can add function execution time here if you measure it
+		Result:                fmt.Sprintf("{\"value\": \"%s\" }", result.Value),
+		ResultType:            result.Type,
+		FunctionExecutionTime: duration.Milliseconds(),
 	}
 
 	payloadJSON, err := json.Marshal(payload)
