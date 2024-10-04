@@ -36,19 +36,19 @@ func TestRegisterService(t *testing.T) {
 }
 
 func TestRegisterDefaultService(t *testing.T) {
-	i, _ := New(InferableOptions{
+	i, err := New(InferableOptions{
 		APIEndpoint: DefaultAPIEndpoint,
 		APISecret:   "test-secret",
 	})
-	service, err := i.DefaultService()
 	require.NoError(t, err)
-	assert.Equal(t, "default", service.Name)
+	assert.Equal(t, "default", i.Default.Name)
 
-  // Fetch the 'default' service again
-  service2, err := i.DefaultService()
-  require.NoError(t, err)
-  // should return the same service reference
-  assert.Same(t, service, service2)
+	err = i.Default.RegisterFunc(Function{
+		Func: func() int { return 42 },
+		Name: "TestFunc",
+	})
+
+	require.NoError(t, err)
 }
 
 func TestCallFunc(t *testing.T) {
@@ -76,6 +76,23 @@ func TestCallFunc(t *testing.T) {
 	// Test calling non-existent function
 	_, err = i.CallFunc("TestService", "NonExistentFunc")
 	assert.Error(t, err)
+}
+
+func TestCallDefaultFunc(t *testing.T) {
+	i, _ := New(InferableOptions{
+		APIEndpoint: DefaultAPIEndpoint,
+		APISecret:   "test-secret",
+	})
+
+	err := i.Default.RegisterFunc(Function{
+		Func: func() int { return 42 },
+		Name: "TestFunc",
+	})
+	require.NoError(t, err)
+
+	result, err := i.CallFunc("default", "TestFunc")
+	require.NoError(t, err)
+	assert.Equal(t, 42, result[0].Interface())
 }
 
 func TestToJSONDefinition(t *testing.T) {

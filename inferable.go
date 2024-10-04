@@ -24,6 +24,7 @@ type Inferable struct {
 	apiSecret        string
 	functionRegistry FunctionRegistry
 	machineID        string // New field for machine ID
+	Default          *Service
 }
 
 type InferableOptions struct {
@@ -49,22 +50,23 @@ func New(options InferableOptions) (*Inferable, error) {
 		machineID = generateMachineID(8)
 	}
 
-	return &Inferable{
+	inferable := &Inferable{
 		client:           client,
 		apiEndpoint:      options.APIEndpoint,
 		apiSecret:        options.APISecret,
 		functionRegistry: FunctionRegistry{services: make(map[string]*Service)},
 		machineID:        machineID,
-	}, nil
-}
-
-// Convenience reference to a service with name 'default'.
-func (i *Inferable) DefaultService() (*Service, error) {
-	if _, exists := i.functionRegistry.services["default"]; exists {
-		return i.functionRegistry.services["default"], nil
 	}
 
-	return i.RegisterService("default")
+	// Automatically register the default service
+	svc, err := inferable.RegisterService("default")
+	if err != nil {
+		return nil, fmt.Errorf("error registering default service: %v", err)
+	}
+
+	inferable.Default = svc
+
+	return inferable, nil
 }
 
 func (i *Inferable) RegisterService(serviceName string) (*Service, error) {
