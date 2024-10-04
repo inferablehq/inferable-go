@@ -20,6 +20,7 @@ To create a new Inferable client, use the `New` function:
 import "github.com/inferablehq/inferable-go/inferable"
 
 client, err := inferable.New("your-api-secret", "https://api.inferable.ai")
+
 if err != nil {
     // Handle error
 }
@@ -36,13 +37,12 @@ type MyInput struct {
     Message string `json:"message"`
 }
 
-service, _ := client.DefaultService()
-
-err := service.RegisterFunc(inferable.Function{
+err := client.Default.RegisterFunc(inferable.Function{
     Func:        myFunc,
     Name:        "MyFunction",
     Description: "A simple greeting function",
 })
+
 if err != nil {
     // Handle error
 }
@@ -83,6 +83,7 @@ err := service.RegisterFunc(inferable.Function{
     Name:        "CreateUser",
     Description: "Creates a new user",
 })
+
 if err != nil {
     // Handle error
 }
@@ -127,6 +128,7 @@ To check if the Inferable server is healthy:
 
 ```go
 err := client.ServerOk()
+
 if err != nil {
     // Handle error
 }

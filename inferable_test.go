@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -37,19 +38,14 @@ func TestRegisterService(t *testing.T) {
 }
 
 func TestRegisterDefaultService(t *testing.T) {
-	i, _ := New(InferableOptions{
+	i, err := New(InferableOptions{
 		APIEndpoint: DefaultAPIEndpoint,
 		APISecret:   "test-secret",
 	})
-	service, err := i.DefaultService()
 	require.NoError(t, err)
-	assert.Equal(t, "default", service.Name)
+	assert.Equal(t, "default", i.Default.Name)
 
-  // Fetch the 'default' service again
-  service2, err := i.DefaultService()
-  require.NoError(t, err)
-  // should return the same service reference
-  assert.Same(t, service, service2)
+	require.NoError(t, err)
 }
 
 func TestCallFunc(t *testing.T) {
@@ -57,7 +53,6 @@ func TestCallFunc(t *testing.T) {
 		APIEndpoint: DefaultAPIEndpoint,
 		APISecret:   "test-secret",
 	})
-	service, _ := i.RegisterService("TestService")
 
 	type TestInput struct {
 		A int `json:"a"`
@@ -65,12 +60,12 @@ func TestCallFunc(t *testing.T) {
 	}
 
 	testFunc := func(input TestInput) int { return input.A + input.B }
-	service.RegisterFunc(Function{
+	i.Default.RegisterFunc(Function{
 		Func: testFunc,
 		Name: "TestFunc",
 	})
 
-	result, err := i.CallFunc("TestService", "TestFunc", TestInput{A: 2, B: 3})
+	result, err := i.CallFunc("default", "TestFunc", TestInput{A: 2, B: 3})
 	require.NoError(t, err)
 	assert.Equal(t, 5, result[0].Interface())
 
@@ -101,12 +96,12 @@ func TestToJSONDefinition(t *testing.T) {
 	jsonDef, err := i.ToJSONDefinition()
 	require.NoError(t, err)
 
-	var definition map[string]interface{}
-	err = json.Unmarshal(jsonDef, &definition)
+	var definitions []map[string]interface{}
+	err = json.Unmarshal(jsonDef, &definitions)
 	require.NoError(t, err)
 
-	assert.Equal(t, "TestService", definition["service"])
-	functions := definition["functions"].([]interface{})
+	assert.Equal(t, "TestService", definitions[1]["service"])
+	functions := definitions[1]["functions"].([]interface{})
 	assert.Len(t, functions, 1)
 	funcDef := functions[0].(map[string]interface{})
 	assert.Equal(t, "TestFunc", funcDef["name"])
@@ -250,9 +245,9 @@ func TestPingCluster(t *testing.T) {
 			t.Errorf("Expected 'services' field to be an array, got %T", body["services"])
 		}
 
-		// Check if the services array contains the expected service
-		if len(services) != 1 || services[0] != "testService" {
-			t.Errorf("Expected services array to contain ['testService'], got %v", services)
+    if !reflect.DeepEqual(services, []interface{}{"default", "testService"}) {
+			t.Errorf("Expected services array to contain ['default', 'testService'], got %v", services)
+
 		}
 
 		// Send a successful response
