@@ -24,8 +24,8 @@ type Inferable struct {
 	apiEndpoint      string
 	apiSecret        string
 	functionRegistry FunctionRegistry
-	machineID        string // New field for machine ID
-	pingTicker       *time.Ticker
+	machineID        string
+	pingInterval     time.Duration
 }
 
 type InferableOptions struct {
@@ -57,7 +57,7 @@ func New(options InferableOptions) (*Inferable, error) {
 		apiSecret:        options.APISecret,
 		functionRegistry: FunctionRegistry{services: make(map[string]*Service)},
 		machineID:        machineID,
-		pingTicker:       time.NewTicker(10 * time.Second),
+		pingInterval:     10 * time.Second,
 	}
 
 	go inferable.startPingCluster()
@@ -66,7 +66,11 @@ func New(options InferableOptions) (*Inferable, error) {
 }
 
 func (i *Inferable) startPingCluster() {
-	for range i.pingTicker.C {
+	i.pingCluster()
+
+	ticker := time.NewTicker(i.pingInterval)
+
+	for range ticker.C {
 		i.pingCluster()
 	}
 }
