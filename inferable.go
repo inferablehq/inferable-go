@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"time"
 )
 
 // Version of the inferable package
@@ -24,6 +25,7 @@ type Inferable struct {
 	apiSecret        string
 	functionRegistry FunctionRegistry
 	machineID        string // New field for machine ID
+	pingTicker       *time.Ticker
 }
 
 type InferableOptions struct {
@@ -49,13 +51,54 @@ func New(options InferableOptions) (*Inferable, error) {
 		machineID = generateMachineID(8)
 	}
 
-	return &Inferable{
+	inferable := &Inferable{
 		client:           client,
 		apiEndpoint:      options.APIEndpoint,
 		apiSecret:        options.APISecret,
 		functionRegistry: FunctionRegistry{services: make(map[string]*Service)},
 		machineID:        machineID,
-	}, nil
+		pingTicker:       time.NewTicker(10 * time.Second),
+	}
+
+	go inferable.startPingCluster()
+
+	return inferable, nil
+}
+
+func (i *Inferable) startPingCluster() {
+	for range i.pingTicker.C {
+		i.pingCluster()
+	}
+}
+
+func (i *Inferable) pingCluster() {
+	activeServices := []string{}
+	for serviceName := range i.functionRegistry.services {
+		activeServices = append(activeServices, serviceName)
+	}
+
+	if len(activeServices) > 0 {
+		body := map[string]interface{}{
+			"services": activeServices,
+		}
+
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			fmt.Printf("Error marshaling ping body: %v\n", err)
+			return
+		}
+
+		_, err = i.client.FetchData(FetchDataOptions{
+			Path:    "/v2/ping",
+			Method:  "POST",
+			Body:    string(jsonBody),
+			Headers: map[string]string{"Content-Type": "application/json"},
+		})
+
+		if err != nil {
+			fmt.Printf("Error pinging cluster. Will try again next interval: %v\n", err)
+		}
+	}
 }
 
 func (i *Inferable) RegisterService(serviceName string) (*Service, error) {
