@@ -245,7 +245,7 @@ func TestPingCluster(t *testing.T) {
 			t.Errorf("Expected 'services' field to be an array, got %T", body["services"])
 		}
 
-    if !reflect.DeepEqual(services, []interface{}{"default", "testService"}) {
+		if !reflect.DeepEqual(services, []interface{}{"default", "testService"}) {
 			t.Errorf("Expected services array to contain ['default', 'testService'], got %v", services)
 
 		}

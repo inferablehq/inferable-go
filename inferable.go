@@ -114,13 +114,12 @@ func (i *Inferable) pingCluster() {
 
 // Convenience reference to a service with name 'default'.
 func (i *Inferable) DefaultService() (*Service, error) {
-  if _, exists := i.functionRegistry.services["default"]; exists {
-    return i.functionRegistry.services["default"], nil
-  }
+	if _, exists := i.functionRegistry.services["default"]; exists {
+		return i.functionRegistry.services["default"], nil
+	}
 
-  return nil, fmt.Errorf("default service not found")
+	return nil, fmt.Errorf("default service not found")
 }
-
 
 func (i *Inferable) RegisterService(serviceName string) (*Service, error) {
 	if _, exists := i.functionRegistry.services[serviceName]; exists {
@@ -183,7 +182,7 @@ func (i *Inferable) ToJSONDefinition() ([]byte, error) {
 		serviceDef["service"] = serviceName
 		serviceDef["functions"] = functions
 
-    definitions = append(definitions, serviceDef)
+		definitions = append(definitions, serviceDef)
 	}
 
 	return json.MarshalIndent(definitions, "", "  ")
