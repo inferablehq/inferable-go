@@ -1,6 +1,6 @@
 # Inferable Go Client
 
-Inferable Go Client is a Go package that provides a client for interacting with the Inferable API. It allows you to register your go services against the Inferable control plane.
+Inferable Go Client is a Go package that provides a client for interacting with the Inferable API. It allows you to register your go functions against the Inferable control plane.
 
 ## Installation
 
@@ -20,6 +20,7 @@ To create a new Inferable client, use the `New` function:
 import "github.com/inferablehq/inferable-go/inferable"
 
 client, err := inferable.New("your-api-secret", "https://api.inferable.ai")
+
 if err != nil {
     // Handle error
 }
@@ -27,35 +28,21 @@ if err != nil {
 
 If you don't provide an API endpoint, it will use the default endpoint: `https://api.inferable.ai`.
 
-### Registering a Service
-
-To register a service:
-
-```go
-service, err := client.RegisterService("MyService")
-if err != nil {
-    // Handle error
-}
-```
-
 ### Registering a Function
 
-After registering a service, you can register functions within that service:
+Register functions within Inferable using the default service.
 
 ```go
 type MyInput struct {
     Message string `json:"message"`
 }
 
-myFunc := func(input MyInput) string {
-    return "Hello, " + input.Message
-}
-
-err := service.RegisterFunc(inferable.Function{
+err := client.Default.RegisterFunc(inferable.Function{
     Func:        myFunc,
     Name:        "MyFunction",
     Description: "A simple greeting function",
 })
+
 if err != nil {
     // Handle error
 }
@@ -96,6 +83,7 @@ err := service.RegisterFunc(inferable.Function{
     Name:        "CreateUser",
     Description: "Creates a new user",
 })
+
 if err != nil {
     // Handle error
 }
@@ -140,6 +128,7 @@ To check if the Inferable server is healthy:
 
 ```go
 err := client.ServerOk()
+
 if err != nil {
     // Handle error
 }

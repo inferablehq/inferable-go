@@ -26,6 +26,7 @@ type Inferable struct {
 	functionRegistry FunctionRegistry
 	machineID        string
 	pingInterval     time.Duration
+	Default          *Service
 }
 
 type InferableOptions struct {
@@ -61,6 +62,12 @@ func New(options InferableOptions) (*Inferable, error) {
 	}
 
 	go inferable.startPingCluster()
+
+	// Automatically register the default service
+	inferable.Default, err = inferable.RegisterService("default")
+	if err != nil {
+		return nil, fmt.Errorf("error registering default service: %v", err)
+	}
 
 	return inferable, nil
 }
@@ -103,6 +110,15 @@ func (i *Inferable) pingCluster() {
 			fmt.Printf("Error pinging cluster. Will try again next interval: %v\n", err)
 		}
 	}
+}
+
+// Convenience reference to a service with name 'default'.
+func (i *Inferable) DefaultService() (*Service, error) {
+	if _, exists := i.functionRegistry.services["default"]; exists {
+		return i.functionRegistry.services["default"], nil
+	}
+
+	return nil, fmt.Errorf("default service not found")
 }
 
 func (i *Inferable) RegisterService(serviceName string) (*Service, error) {
@@ -148,7 +164,7 @@ func (i *Inferable) CallFunc(serviceName, funcName string, args ...interface{}) 
 }
 
 func (i *Inferable) ToJSONDefinition() ([]byte, error) {
-	definition := make(map[string]interface{})
+	definitions := make([]map[string]interface{}, 0)
 
 	for serviceName, service := range i.functionRegistry.services {
 		serviceDef := make(map[string]interface{})
@@ -165,11 +181,11 @@ func (i *Inferable) ToJSONDefinition() ([]byte, error) {
 
 		serviceDef["service"] = serviceName
 		serviceDef["functions"] = functions
-		definition = serviceDef // We only need one service per definition
-		break                   // We only process the first service
+
+		definitions = append(definitions, serviceDef)
 	}
 
-	return json.MarshalIndent(definition, "", "  ")
+	return json.MarshalIndent(definitions, "", "  ")
 }
 
 func (i *Inferable) FetchData(options FetchDataOptions) ([]byte, error) {
