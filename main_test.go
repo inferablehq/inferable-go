@@ -1,10 +1,7 @@
 package inferable
 
 import (
-	"os"
 	"testing"
-
-	"github.com/joho/godotenv"
 )
 
 type EchoInput struct {
@@ -28,24 +25,11 @@ func reverse(input ReverseInput) string {
 }
 
 func TestInferableFunctions(t *testing.T) {
-	if os.Getenv("INFERABLE_API_SECRET") == "" {
-		err := godotenv.Load("./.env")
-
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	apiEndpoint := os.Getenv("INFERABLE_API_ENDPOINT")
-	apiSecret := os.Getenv("INFERABLE_API_SECRET")
-
-	if apiEndpoint == "" || apiSecret == "" {
-		t.Fatal("INFERABLE_API_ENDPOINT or INFERABLE_API_SECRET not set in .env file")
-	}
+	machineSecret, _, _, apiEndpoint := getTestVars()
 
 	inferableInstance, err := New(InferableOptions{
 		APIEndpoint: apiEndpoint,
-		APISecret:   apiSecret,
+		APISecret:   machineSecret,
 	})
 	if err != nil {
 		t.Fatalf("Error creating Inferable instance: %v", err)
@@ -131,9 +115,11 @@ func TestInferableFunctions(t *testing.T) {
 	})
 
 	t.Run("Machine ID Consistency", func(t *testing.T) {
+		machineSecret, _, _, apiEndpoint := getTestVars()
+
 		instance1, err := New(InferableOptions{
 			APIEndpoint: apiEndpoint,
-			APISecret:   apiSecret,
+			APISecret:   machineSecret,
 		})
 		if err != nil {
 			t.Fatalf("Error creating first Inferable instance: %v", err)
@@ -142,7 +128,7 @@ func TestInferableFunctions(t *testing.T) {
 
 		instance2, err := New(InferableOptions{
 			APIEndpoint: apiEndpoint,
-			APISecret:   apiSecret,
+			APISecret:   machineSecret,
 		})
 		if err != nil {
 			t.Fatalf("Error creating second Inferable instance: %v", err)
