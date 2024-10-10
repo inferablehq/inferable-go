@@ -3,21 +3,20 @@ package inferable
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"testing"
-	"time"
 
 	"bytes"
 	"net/http"
 
-	"github.com/joho/godotenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestRegisterFunc(t *testing.T) {
+	_, _, _, apiEndpoint := getTestVars()
+
 	i, _ := New(InferableOptions{
-		APIEndpoint: DefaultAPIEndpoint,
+		APIEndpoint: apiEndpoint,
 		APISecret:   "test-secret",
 	})
 	service, _ := i.RegisterService("TestService")
@@ -52,24 +51,14 @@ func TestRegisterFunc(t *testing.T) {
 }
 
 func TestRegistrationAndConfig(t *testing.T) {
-	// Load environment variables
-	if os.Getenv("INFERABLE_API_SECRET") == "" {
-		err := godotenv.Load("./.env")
+	machineSecret, _, _, apiEndpoint := getTestVars()
 
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	apiSecret := os.Getenv("INFERABLE_API_SECRET")
 	machineID := "random-machine-id"
-
-	require.NotEmpty(t, apiSecret, "INFERABLE_API_SECRET is not set in .env")
 
 	// Create a new Inferable instance
 	i, err := New(InferableOptions{
-		APIEndpoint: DefaultAPIEndpoint,
-		APISecret:   apiSecret,
+		APIEndpoint: apiEndpoint,
+		APISecret:   machineSecret,
 		MachineID:   machineID,
 	})
 	require.NoError(t, err)
@@ -102,36 +91,17 @@ func TestRegistrationAndConfig(t *testing.T) {
 	// Call Listen to trigger registration
 	err = service.Start()
 	require.NoError(t, err)
-
-	// Get the config and check the details
-	config := service.GetConfig()
-
-	// Verify non-sensitive information
-	assert.NotEmpty(t, config.QueueURL)
-	assert.NotEmpty(t, config.Region)
-	assert.True(t, config.Enabled)
-	assert.True(t, config.Expiration.After(time.Now()))
 }
 
 func TestErrorneousRegistration(t *testing.T) {
-	// Load environment variables
-	if os.Getenv("INFERABLE_API_SECRET") == "" {
-		err := godotenv.Load("./.env")
+	machineSecret, _, _, apiEndpoint := getTestVars()
 
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	apiSecret := os.Getenv("INFERABLE_API_SECRET")
 	machineID := "random-machine-id"
-
-	require.NotEmpty(t, apiSecret, "INFERABLE_API_SECRET is not set in .env")
 
 	// Create a new Inferable instance
 	i, err := New(InferableOptions{
-		APIEndpoint: os.Getenv("INFERABLE_API_ENDPOINT"),
-		APISecret:   apiSecret,
+		APIEndpoint: apiEndpoint,
+		APISecret:   machineSecret,
 		MachineID:   machineID,
 	})
 	require.NoError(t, err)
@@ -167,22 +137,14 @@ func TestErrorneousRegistration(t *testing.T) {
 }
 
 func TestServiceStartAndReceiveMessage(t *testing.T) {
-	if os.Getenv("INFERABLE_API_SECRET") == "" {
-		err := godotenv.Load("./.env")
-		require.NoError(t, err, "Error loading .env file")
-	}
+	machineSecret, consumeSecret, clusterId, apiEndpoint := getTestVars()
 
-	machineID := os.Getenv("INFERABLE_MACHINE_ID")
-	apiSecret := os.Getenv("INFERABLE_API_SECRET")
-	clusterId := os.Getenv("INFERABLE_CLUSTER_ID")
-
-	require.NotEmpty(t, apiSecret, "INFERABLE_API_SECRET is not set in .env")
-	require.NotEmpty(t, clusterId, "INFERABLE_CLUSTER_ID is not set in .env")
+	machineID := "random-machine-id"
 
 	// Create a new Inferable instance
 	i, err := New(InferableOptions{
-		APIEndpoint: DefaultAPIEndpoint,
-		APISecret:   apiSecret,
+		APIEndpoint: apiEndpoint,
+		APISecret:   machineSecret,
 		MachineID:   machineID,
 	})
 	require.NoError(t, err)
@@ -214,7 +176,7 @@ func TestServiceStartAndReceiveMessage(t *testing.T) {
 
 	// Use executeJobSync to invoke the function
 	testMessage := "Hello, SQS!"
-	executeJobSyncURL := fmt.Sprintf("https://api.inferable.ai/clusters/%s/execute", clusterId)
+	executeCallUrl := fmt.Sprintf("%s/clusters/%s/calls?waitTime=20", apiEndpoint, clusterId)
 	payload := map[string]interface{}{
 		"service":  "TestService",
 		"function": "TestFunc",
@@ -226,11 +188,11 @@ func TestServiceStartAndReceiveMessage(t *testing.T) {
 	jsonPayload, err := json.Marshal(payload)
 	require.NoError(t, err)
 
-	req, err := http.NewRequest("POST", executeJobSyncURL, bytes.NewBuffer(jsonPayload))
+	req, err := http.NewRequest("POST", executeCallUrl, bytes.NewBuffer(jsonPayload))
 	require.NoError(t, err)
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiSecret)
+	req.Header.Set("Authorization", "Bearer "+consumeSecret)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)

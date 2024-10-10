@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/invopop/jsonschema"
 )
 
@@ -17,19 +16,9 @@ type Service struct {
 	Name      string
 	Functions map[string]Function
 	inferable *Inferable
-	// Add new fields to store registration details
-	queueURL    string
-	region      string
-	enabled     bool
-	expiration  time.Time
-	credentials struct {
-		AccessKeyID     string
-		SecretAccessKey string
-		SessionToken    string
-	}
-	consumer *SQSConsumer
-	ctx      context.Context
-	cancel   context.CancelFunc
+	clusterId string
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 type Function struct {
@@ -38,6 +27,12 @@ type Function struct {
 	schema      interface{}
 	Config      interface{}
 	Func        interface{}
+}
+
+type CallMessage struct {
+	Id       string      `json:"id"`
+	Function string      `json:"function"`
+	Input    interface{} `json:"input"`
 }
 
 func (s *Service) RegisterFunc(fn Function) error {
@@ -150,15 +145,7 @@ func (s *Service) registerMachine() error {
 
 	// Parse the response
 	var response struct {
-		QueueURL    string    `json:"queueUrl"`
-		Region      string    `json:"region"`
-		Enabled     bool      `json:"enabled"`
-		Expiration  time.Time `json:"expiration"`
-		Credentials struct {
-			AccessKeyID     string `json:"accessKeyId"`
-			SecretAccessKey string `json:"secretAccessKey"`
-			SessionToken    string `json:"sessionToken"`
-		} `json:"credentials"`
+		ClusterId string `json:"clusterId"`
 	}
 
 	err = json.Unmarshal(responseData, &response)
@@ -166,14 +153,7 @@ func (s *Service) registerMachine() error {
 		return fmt.Errorf("failed to parse registration response: %v", err)
 	}
 
-	// Store the registration details in the Service struct
-	s.queueURL = response.QueueURL
-	s.region = response.Region
-	s.enabled = response.Enabled
-	s.expiration = response.Expiration
-	s.credentials.AccessKeyID = response.Credentials.AccessKeyID
-	s.credentials.SecretAccessKey = response.Credentials.SecretAccessKey
-	s.credentials.SessionToken = response.Credentials.SessionToken
+	s.clusterId = response.ClusterId
 
 	return nil
 }
@@ -185,30 +165,22 @@ func (s *Service) Start() error {
 		return fmt.Errorf("failed to register machine: %v", err)
 	}
 
-	// Create a new SQSConsumer with credentials
-	consumer, err := NewSQSConsumer(
-		s.region,
-		s.queueURL,
-		s.handleMessage,
-		s.credentials.AccessKeyID,
-		s.credentials.SecretAccessKey,
-		s.credentials.SessionToken,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to create SQS consumer: %v", err)
-	}
-
-	s.consumer = consumer
-
-	// Create a new context with cancellation
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
-	// Start polling for messages and handle potential errors
+	// Creat a run loop
 	go func() {
-		if err := s.consumer.Start(s.ctx); err != nil {
-			log.Printf("Error starting SQS consumer: %v", err)
-			s.Stop() // Stop the service if there's an error starting the consumer
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			default:
+				// TODO: Retry-after
+				// TODO: Error count
+				err := s.poll()
+				if err != nil {
+					log.Printf("Failed to poll: %v", err)
+				}
+			}
 		}
 	}()
 
@@ -224,47 +196,56 @@ func (s *Service) Stop() {
 	}
 }
 
-// handleMessage is a dummy message handler that just logs the received message
-func (s *Service) handleMessage(msg *sqs.Message) error {
-	log.Printf("Received message: %s", *msg.Body)
-
-	// Define a struct to unmarshal the outer JSON structure
-	var outerPayload struct {
-		Value struct {
-			ID         string `json:"id"`
-			Service    string `json:"service"`
-			TargetFn   string `json:"targetFn"`
-			TargetArgs string `json:"targetArgs"` // Changed to string
-		} `json:"value"`
+func (s *Service) poll() error {
+	headers := map[string]string{
+		"Authorization":          "Bearer " + s.inferable.apiSecret,
+		"X-Machine-ID":           s.inferable.machineID,
+		"X-Machine-SDK-Version":  Version,
+		"X-Machine-SDK-Language": "go",
 	}
 
-	// Unmarshal the message body into the outer payload struct
-	if err := json.Unmarshal([]byte(*msg.Body), &outerPayload); err != nil {
-		return fmt.Errorf("failed to unmarshal message body: %v", err)
+	options := FetchDataOptions{
+		Path:    fmt.Sprintf("/clusters/%s/calls?acknowledge=true&service=%s&status=pending&limit=10", s.clusterId, s.Name),
+		Method:  "GET",
+		Headers: headers,
 	}
 
-	// Call acknowledgeJob
-	if err := s.acknowledgeJob(outerPayload.Value.ID); err != nil {
-		log.Printf("Failed to acknowledge job: %v", err)
-		// Continue processing the job even if acknowledgement fails
+	result, err := s.inferable.FetchData(options)
+	if err != nil {
+		return fmt.Errorf("failed to poll calls: %v", err)
 	}
+
+	parsed := []CallMessage{}
+
+	err = json.Unmarshal(result, &parsed)
+	if err != nil {
+		return fmt.Errorf("failed to parse poll response: %v", err)
+	}
+
+	log.Printf("Polled for messages: %v", parsed)
+
+	errors := []string{}
+	for _, msg := range parsed {
+		err := s.handleMessage(msg)
+		if err != nil {
+			errors = append(errors, err.Error())
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("failed to handle messages: %v", errors)
+	}
+
+	return nil
+}
+
+func (s *Service) handleMessage(msg CallMessage) error {
+	log.Printf("Received message: %s", msg.Id)
 
 	// Find the target function
-	fn, ok := s.Functions[outerPayload.Value.TargetFn]
+	fn, ok := s.Functions[msg.Function]
 	if !ok {
-		return fmt.Errorf("function not found: %s", outerPayload.Value.TargetFn)
-	}
-
-	// Unmarshal the target arguments string into a map
-	var argsMap map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(outerPayload.Value.TargetArgs), &argsMap); err != nil {
-		return fmt.Errorf("failed to unmarshal target arguments: %v", err)
-	}
-
-	// Extract the "value" field from the argsMap
-	valueJSON, ok := argsMap["value"]
-	if !ok {
-		return fmt.Errorf("'value' field not found in target arguments")
+		return fmt.Errorf("function not found: %s", msg.Function)
 	}
 
 	// Create a new instance of the function's input type
@@ -272,10 +253,10 @@ func (s *Service) handleMessage(msg *sqs.Message) error {
 	argType := fnType.In(0)
 	argPtr := reflect.New(argType)
 
-	// Unmarshal the value JSON into the function's input type
-	if err := json.Unmarshal(valueJSON, argPtr.Interface()); err != nil {
-		return fmt.Errorf("failed to unmarshal value into function argument: %v", err)
-	}
+	// // Unmarshal the value JSON into the function's input type
+	// if err := json.Unmarshal(valueJSON, argPtr.Interface()); err != nil {
+	// 	return fmt.Errorf("failed to unmarshal value into function argument: %v", err)
+	// }
 
 	// Call the function with the unmarshaled argument
 	fnValue := reflect.ValueOf(fn.Func)
@@ -284,63 +265,34 @@ func (s *Service) handleMessage(msg *sqs.Message) error {
 	log.Printf("Function '%s' called successfully", fn.Name)
 
 	start := time.Now()
-	// Prepare the result
-	result, err := s.prepareResult(returnValues)
-	if err != nil {
-		return fmt.Errorf("failed to prepare result: %v", err)
+	result := Result{
+		Result:     returnValues[0].Interface(),
+		ResultType: "resolution",
+		Meta: ResultMetadata{
+			FunctionExecutionTime: int64(time.Since(start).Milliseconds()),
+		},
 	}
 
 	// Persist the job result
-	if err := s.persistJobResult(outerPayload.Value.ID, result, time.Since(start)); err != nil {
+	if err := s.persistJobResult(msg.Id, result); err != nil {
 		return fmt.Errorf("failed to persist job result: %v", err)
 	}
 
 	return nil
 }
 
-func (s *Service) prepareResult(returnValues []reflect.Value) (struct {
-	Value string `json:"value"`
-	Type  string `json:"type"`
-}, error) {
-	var result struct {
-		Value string `json:"value"`
-		Type  string `json:"type"`
-	}
-
-	if len(returnValues) > 0 {
-		if errInterface, ok := returnValues[0].Interface().(error); ok {
-			if errInterface != nil {
-				result.Value = errInterface.Error()
-				result.Type = "rejection"
-			}
-		} else {
-			resultJSON, err := json.Marshal(returnValues[0].Interface())
-			if err != nil {
-				return result, fmt.Errorf("failed to marshal result: %v", err)
-			}
-			result.Value = string(resultJSON)
-			result.Type = "resolution"
-		}
-	}
-
-	return result, nil
+type ResultMetadata struct {
+	FunctionExecutionTime int64 `json:"functionExecutionTime,omitempty"`
 }
 
-func (s *Service) persistJobResult(jobID string, result struct {
-	Value string `json:"value"`
-	Type  string `json:"type"`
-}, duration time.Duration) error {
-	payload := struct {
-		Result                string `json:"result"`
-		ResultType            string `json:"resultType"`
-		FunctionExecutionTime int64  `json:"functionExecutionTime,omitempty"`
-	}{
-		Result:                fmt.Sprintf("{\"value\": %s }", result.Value),
-		ResultType:            result.Type,
-		FunctionExecutionTime: duration.Milliseconds(),
-	}
+type Result struct {
+	Result     interface{}    `json:"result"`
+	ResultType string         `json:"resultType"`
+	Meta       ResultMetadata `json:"meta"`
+}
 
-	payloadJSON, err := json.Marshal(payload)
+func (s *Service) persistJobResult(jobID string, result Result) error {
+	payloadJSON, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload for persistJobResult: %v", err)
 	}
@@ -353,7 +305,7 @@ func (s *Service) persistJobResult(jobID string, result struct {
 	}
 
 	options := FetchDataOptions{
-		Path:    fmt.Sprintf("/jobs/%s/result", jobID),
+		Path:    fmt.Sprintf("/clusters/%s/calls/%s/result", s.clusterId, jobID),
 		Method:  "POST",
 		Headers: headers,
 		Body:    string(payloadJSON),
@@ -365,56 +317,6 @@ func (s *Service) persistJobResult(jobID string, result struct {
 	}
 
 	return nil
-}
-
-// Add the new acknowledgeJob function
-func (s *Service) acknowledgeJob(jobID string) error {
-	// Prepare headers
-	headers := map[string]string{
-		"Authorization":          "Bearer " + s.inferable.apiSecret,
-		"X-Machine-ID":           s.inferable.machineID,
-		"X-Machine-SDK-Version":  Version,
-		"X-Machine-SDK-Language": "go",
-	}
-
-	// Call the acknowledgeJob endpoint
-	options := FetchDataOptions{
-		Path:    fmt.Sprintf("/jobs/%s", jobID),
-		Method:  "PUT",
-		Headers: headers,
-	}
-
-	_, err := s.inferable.FetchData(options)
-	if err != nil {
-		return fmt.Errorf("failed to acknowledge job: %v", err)
-	}
-
-	return nil
-}
-
-// Config represents the configuration of the service with obfuscated sensitive details
-type Config struct {
-	QueueURL    string    `json:"queueUrl"`
-	Region      string    `json:"region"`
-	Enabled     bool      `json:"enabled"`
-	Expiration  time.Time `json:"expiration"`
-	Credentials struct {
-		AccessKeyID     string `json:"accessKeyId"`
-		SecretAccessKey string `json:"secretAccessKey"`
-		SessionToken    string `json:"sessionToken"`
-	} `json:"credentials"`
-}
-
-// GetConfig returns the current configuration with obfuscated sensitive details
-func (s *Service) GetConfig() Config {
-	config := Config{
-		QueueURL:   s.queueURL,
-		Region:     s.region,
-		Enabled:    s.enabled,
-		Expiration: s.expiration,
-	}
-
-	return config
 }
 
 func (s *Service) GetSchema() (map[string]interface{}, error) {

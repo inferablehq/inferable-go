@@ -12,9 +12,10 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      INFERABLE_API_SECRET: ${{ secrets.INFERABLE_API_SECRET }}
-      INFERABLE_API_ENDPOINT: ${{ secrets.INFERABLE_API_ENDPOINT }}
-      INFERABLE_CLUSTER_ID: ${{ secrets.INFERABLE_CLUSTER_ID }}
+      INFERABLE_API_ENDPOINT: 'https://api.inferable.ai'
+      INFERABLE_CLUSTER_ID: ${{ vars.INFERABLE_CLUSTER_ID }}
+      INFERABLE_MACHINE_SECRET: ${{ secrets.INFERABLE_MACHINE_SECRET }}
+      INFERABLE_CONSUME_SECRET: ${{ secrets.INFERABLE_CONSUME_SECRET }}
 
     steps:
       - name: Check out code
