@@ -6,31 +6,19 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/invopop/jsonschema"
+
+	"github.com/inferablehq/inferable-go/internal/client"
 )
 
-type Service struct {
-	Name      string
-	Functions map[string]Function
-	inferable *Inferable
-	// Add new fields to store registration details
-	queueURL    string
-	region      string
-	enabled     bool
-	expiration  time.Time
-	credentials struct {
-		AccessKeyID     string
-		SecretAccessKey string
-		SessionToken    string
-	}
-	consumer *SQSConsumer
-	ctx      context.Context
-	cancel   context.CancelFunc
-}
+const (
+  MaxConsecutivePollFailures = 50
+  DefaultRetryAfter = 10
+)
 
 type Function struct {
 	Name        string
@@ -40,7 +28,33 @@ type Function struct {
 	Func        interface{}
 }
 
-func (s *Service) RegisterFunc(fn Function) error {
+type service struct {
+	Name       string
+	Functions  map[string]Function
+	inferable  *Inferable
+	clusterId  string
+	ctx        context.Context
+	cancel     context.CancelFunc
+  retryAfter int
+}
+
+type callMessage struct {
+	Id       string      `json:"id"`
+	Function string      `json:"function"`
+	Input    interface{} `json:"input"`
+}
+
+type resultMetadata struct {
+	FunctionExecutionTime int64 `json:"functionExecutionTime,omitempty"`
+}
+
+type result struct {
+	Result     interface{}    `json:"result"`
+	ResultType string         `json:"resultType"`
+	Meta       resultMetadata `json:"meta"`
+}
+
+func (s *service) RegisterFunc(fn Function) error {
 	if _, exists := s.Functions[fn.Name]; exists {
 		return fmt.Errorf("function with name '%s' already registered for service '%s'", fn.Name, s.Name)
 	}
@@ -85,7 +99,7 @@ func (s *Service) RegisterFunc(fn Function) error {
 	return nil
 }
 
-func (s *Service) registerMachine() error {
+func (s *service) registerMachine() error {
 	// Check if there are any registered functions
 	if len(s.Functions) == 0 {
 		return fmt.Errorf("cannot register service '%s': no functions registered", s.Name)
@@ -136,29 +150,21 @@ func (s *Service) registerMachine() error {
 	}
 
 	// Call the registerMachine endpoint
-	options := FetchDataOptions{
+	options := client.FetchDataOptions{
 		Path:    "/machines",
 		Method:  "POST",
 		Headers: headers,
 		Body:    string(jsonPayload),
 	}
 
-	responseData, err := s.inferable.FetchData(options)
+	responseData, _, err := s.inferable.fetchData(options)
 	if err != nil {
 		return fmt.Errorf("failed to register machine: %v", err)
 	}
 
 	// Parse the response
 	var response struct {
-		QueueURL    string    `json:"queueUrl"`
-		Region      string    `json:"region"`
-		Enabled     bool      `json:"enabled"`
-		Expiration  time.Time `json:"expiration"`
-		Credentials struct {
-			AccessKeyID     string `json:"accessKeyId"`
-			SecretAccessKey string `json:"secretAccessKey"`
-			SessionToken    string `json:"sessionToken"`
-		} `json:"credentials"`
+		ClusterId string `json:"clusterId"`
 	}
 
 	err = json.Unmarshal(responseData, &response)
@@ -166,181 +172,171 @@ func (s *Service) registerMachine() error {
 		return fmt.Errorf("failed to parse registration response: %v", err)
 	}
 
-	// Store the registration details in the Service struct
-	s.queueURL = response.QueueURL
-	s.region = response.Region
-	s.enabled = response.Enabled
-	s.expiration = response.Expiration
-	s.credentials.AccessKeyID = response.Credentials.AccessKeyID
-	s.credentials.SecretAccessKey = response.Credentials.SecretAccessKey
-	s.credentials.SessionToken = response.Credentials.SessionToken
+	s.clusterId = response.ClusterId
 
 	return nil
 }
 
 // Start initializes the service, registers the machine, and starts polling for messages
-func (s *Service) Start() error {
+func (s *service) Start() error {
 	err := s.registerMachine()
 	if err != nil {
 		return fmt.Errorf("failed to register machine: %v", err)
 	}
 
-	// Create a new SQSConsumer with credentials
-	consumer, err := NewSQSConsumer(
-		s.region,
-		s.queueURL,
-		s.handleMessage,
-		s.credentials.AccessKeyID,
-		s.credentials.SecretAccessKey,
-		s.credentials.SessionToken,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to create SQS consumer: %v", err)
-	}
-
-	s.consumer = consumer
-
-	// Create a new context with cancellation
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+  s.retryAfter = 0
 
-	// Start polling for messages and handle potential errors
-	go func() {
-		if err := s.consumer.Start(s.ctx); err != nil {
-			log.Printf("Error starting SQS consumer: %v", err)
-			s.Stop() // Stop the service if there's an error starting the consumer
-		}
-	}()
+  go func() {
+    failureCount := DefaultRetryAfter
+    for {
+      time.Sleep(time.Duration(s.retryAfter) * time.Second)
+
+      select {
+      case <-s.ctx.Done():
+        return
+      default:
+        err := s.poll()
+
+        if err != nil {
+          failureCount++
+
+          if failureCount > MaxConsecutivePollFailures {
+            log.Printf("Too many consecutive poll failures, exiting service: %s", s.Name)
+            s.Stop()
+          }
+
+          log.Printf("Failed to poll: %v", err)
+        }
+      }
+    }
+  }()
 
 	log.Printf("Service '%s' started and polling for messages", s.Name)
 	return nil
 }
 
 // Stop stops the service and cancels the polling
-func (s *Service) Stop() {
+func (s *service) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 		log.Printf("Service '%s' stopped", s.Name)
 	}
 }
 
-// handleMessage is a dummy message handler that just logs the received message
-func (s *Service) handleMessage(msg *sqs.Message) error {
-	log.Printf("Received message: %s", *msg.Body)
-
-	// Define a struct to unmarshal the outer JSON structure
-	var outerPayload struct {
-		Value struct {
-			ID         string `json:"id"`
-			Service    string `json:"service"`
-			TargetFn   string `json:"targetFn"`
-			TargetArgs string `json:"targetArgs"` // Changed to string
-		} `json:"value"`
+func (s *service) poll() error {
+	headers := map[string]string{
+		"Authorization":          "Bearer " + s.inferable.apiSecret,
+		"X-Machine-ID":           s.inferable.machineID,
+		"X-Machine-SDK-Version":  Version,
+		"X-Machine-SDK-Language": "go",
 	}
 
-	// Unmarshal the message body into the outer payload struct
-	if err := json.Unmarshal([]byte(*msg.Body), &outerPayload); err != nil {
-		return fmt.Errorf("failed to unmarshal message body: %v", err)
+	options := client.FetchDataOptions{
+		Path:    fmt.Sprintf("/clusters/%s/calls?acknowledge=true&service=%s&status=pending&limit=10", s.clusterId, s.Name),
+		Method:  "GET",
+		Headers: headers,
 	}
 
-	// Call acknowledgeJob
-	if err := s.acknowledgeJob(outerPayload.Value.ID); err != nil {
-		log.Printf("Failed to acknowledge job: %v", err)
-		// Continue processing the job even if acknowledgement fails
+	result, respHeaders, err := s.inferable.fetchData(options)
+	if err != nil {
+		return fmt.Errorf("failed to poll calls: %v", err)
 	}
 
+  // log headers
+  for k, v := range respHeaders {
+    log.Printf("%s: %s", k, v)
+  }
+  if retryAfter, ok := respHeaders["Retry-After"]; ok {
+    for _, v := range retryAfter {
+      if i, err := strconv.Atoi(v); err == nil {
+        s.retryAfter = i
+      }
+    }
+  }
+
+	parsed := []callMessage{}
+
+	err = json.Unmarshal(result, &parsed)
+	if err != nil {
+		return fmt.Errorf("failed to parse poll response: %v", err)
+	}
+
+	errors := []string{}
+	for _, msg := range parsed {
+		err := s.handleMessage(msg)
+		if err != nil {
+			errors = append(errors, err.Error())
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("failed to handle messages: %v", errors)
+	}
+
+	return nil
+}
+
+func (s *service) handleMessage(msg callMessage) error {
 	// Find the target function
-	fn, ok := s.Functions[outerPayload.Value.TargetFn]
+	fn, ok := s.Functions[msg.Function]
 	if !ok {
-		return fmt.Errorf("function not found: %s", outerPayload.Value.TargetFn)
+		return fmt.Errorf("function not found: %s", msg.Function)
 	}
 
-	// Unmarshal the target arguments string into a map
-	var argsMap map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(outerPayload.Value.TargetArgs), &argsMap); err != nil {
-		return fmt.Errorf("failed to unmarshal target arguments: %v", err)
-	}
+  // Create a new instance of the function's input type
+  fnType := reflect.TypeOf(fn.Func)
+  argType := fnType.In(0)
+  argPtr := reflect.New(argType)
 
-	// Extract the "value" field from the argsMap
-	valueJSON, ok := argsMap["value"]
-	if !ok {
-		return fmt.Errorf("'value' field not found in target arguments")
-	}
+  inputJson, err := json.Marshal(msg.Input)
 
-	// Create a new instance of the function's input type
-	fnType := reflect.TypeOf(fn.Func)
-	argType := fnType.In(0)
-	argPtr := reflect.New(argType)
+  if err != nil {
+    return fmt.Errorf("failed to marshal input: %v", err)
+  }
 
-	// Unmarshal the value JSON into the function's input type
-	if err := json.Unmarshal(valueJSON, argPtr.Interface()); err != nil {
-		return fmt.Errorf("failed to unmarshal value into function argument: %v", err)
-	}
+  err = json.Unmarshal(inputJson, argPtr.Interface())
+  if err != nil {
+    return fmt.Errorf("failed to unmarshal input: %v", err)
+  }
 
+
+	start := time.Now()
 	// Call the function with the unmarshaled argument
 	fnValue := reflect.ValueOf(fn.Func)
 	returnValues := fnValue.Call([]reflect.Value{argPtr.Elem()})
 
-	log.Printf("Function '%s' called successfully", fn.Name)
+  resultType := "resolution"
+  resultValue := returnValues[0].Interface()
 
-	start := time.Now()
-	// Prepare the result
-	result, err := s.prepareResult(returnValues)
-	if err != nil {
-		return fmt.Errorf("failed to prepare result: %v", err)
+  // Check if ANY of the return values is an error
+  for _, v := range returnValues {
+    if v.Type().AssignableTo(reflect.TypeOf((*error)(nil)).Elem()) && v.Interface() != nil {
+      resultType = "rejection"
+      // Serialize the error
+      resultValue = v.Interface().(error).Error()
+      break
+    }
+  }
+
+	result := result{
+		Result:     resultValue,
+		ResultType: resultType,
+		Meta: resultMetadata{
+			FunctionExecutionTime: int64(time.Since(start).Milliseconds()),
+		},
 	}
 
 	// Persist the job result
-	if err := s.persistJobResult(outerPayload.Value.ID, result, time.Since(start)); err != nil {
+	if err := s.persistJobResult(msg.Id, result); err != nil {
 		return fmt.Errorf("failed to persist job result: %v", err)
 	}
 
 	return nil
 }
 
-func (s *Service) prepareResult(returnValues []reflect.Value) (struct {
-	Value string `json:"value"`
-	Type  string `json:"type"`
-}, error) {
-	var result struct {
-		Value string `json:"value"`
-		Type  string `json:"type"`
-	}
-
-	if len(returnValues) > 0 {
-		if errInterface, ok := returnValues[0].Interface().(error); ok {
-			if errInterface != nil {
-				result.Value = errInterface.Error()
-				result.Type = "rejection"
-			}
-		} else {
-			resultJSON, err := json.Marshal(returnValues[0].Interface())
-			if err != nil {
-				return result, fmt.Errorf("failed to marshal result: %v", err)
-			}
-			result.Value = string(resultJSON)
-			result.Type = "resolution"
-		}
-	}
-
-	return result, nil
-}
-
-func (s *Service) persistJobResult(jobID string, result struct {
-	Value string `json:"value"`
-	Type  string `json:"type"`
-}, duration time.Duration) error {
-	payload := struct {
-		Result                string `json:"result"`
-		ResultType            string `json:"resultType"`
-		FunctionExecutionTime int64  `json:"functionExecutionTime,omitempty"`
-	}{
-		Result:                fmt.Sprintf("{\"value\": %s }", result.Value),
-		ResultType:            result.Type,
-		FunctionExecutionTime: duration.Milliseconds(),
-	}
-
-	payloadJSON, err := json.Marshal(payload)
+func (s *service) persistJobResult(jobID string, result result) error {
+	payloadJSON, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload for persistJobResult: %v", err)
 	}
@@ -352,14 +348,14 @@ func (s *Service) persistJobResult(jobID string, result struct {
 		"X-Machine-SDK-Language": "go",
 	}
 
-	options := FetchDataOptions{
-		Path:    fmt.Sprintf("/jobs/%s/result", jobID),
+	options := client.FetchDataOptions{
+		Path:    fmt.Sprintf("/clusters/%s/calls/%s/result", s.clusterId, jobID),
 		Method:  "POST",
 		Headers: headers,
 		Body:    string(payloadJSON),
 	}
 
-	_, err = s.inferable.FetchData(options)
+	_, _, err = s.inferable.fetchData(options)
 	if err != nil {
 		return fmt.Errorf("failed to persist job result: %v", err)
 	}
@@ -367,57 +363,7 @@ func (s *Service) persistJobResult(jobID string, result struct {
 	return nil
 }
 
-// Add the new acknowledgeJob function
-func (s *Service) acknowledgeJob(jobID string) error {
-	// Prepare headers
-	headers := map[string]string{
-		"Authorization":          "Bearer " + s.inferable.apiSecret,
-		"X-Machine-ID":           s.inferable.machineID,
-		"X-Machine-SDK-Version":  Version,
-		"X-Machine-SDK-Language": "go",
-	}
-
-	// Call the acknowledgeJob endpoint
-	options := FetchDataOptions{
-		Path:    fmt.Sprintf("/jobs/%s", jobID),
-		Method:  "PUT",
-		Headers: headers,
-	}
-
-	_, err := s.inferable.FetchData(options)
-	if err != nil {
-		return fmt.Errorf("failed to acknowledge job: %v", err)
-	}
-
-	return nil
-}
-
-// Config represents the configuration of the service with obfuscated sensitive details
-type Config struct {
-	QueueURL    string    `json:"queueUrl"`
-	Region      string    `json:"region"`
-	Enabled     bool      `json:"enabled"`
-	Expiration  time.Time `json:"expiration"`
-	Credentials struct {
-		AccessKeyID     string `json:"accessKeyId"`
-		SecretAccessKey string `json:"secretAccessKey"`
-		SessionToken    string `json:"sessionToken"`
-	} `json:"credentials"`
-}
-
-// GetConfig returns the current configuration with obfuscated sensitive details
-func (s *Service) GetConfig() Config {
-	config := Config{
-		QueueURL:   s.queueURL,
-		Region:     s.region,
-		Enabled:    s.enabled,
-		Expiration: s.expiration,
-	}
-
-	return config
-}
-
-func (s *Service) GetSchema() (map[string]interface{}, error) {
+func (s *service) getSchema() (map[string]interface{}, error) {
 	if len(s.Functions) == 0 {
 		return nil, fmt.Errorf("no functions registered for service '%s'", s.Name)
 	}
@@ -432,4 +378,8 @@ func (s *Service) GetSchema() (map[string]interface{}, error) {
 	}
 
 	return schema, nil
+}
+
+func (s *service) isPolling() bool {
+  return s.cancel != nil
 }

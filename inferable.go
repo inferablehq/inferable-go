@@ -4,8 +4,11 @@ package inferable
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"reflect"
-	"time"
+
+	"github.com/inferablehq/inferable-go/internal/client"
+	"github.com/inferablehq/inferable-go/internal/util"
 )
 
 // Version of the inferable package
@@ -15,18 +18,17 @@ const (
 	DefaultAPIEndpoint = "https://api.inferable.ai"
 )
 
-type FunctionRegistry struct {
-	services map[string]*Service
+type functionRegistry struct {
+	services map[string]*service
 }
 
 type Inferable struct {
-	client           *Client
+	client           *client.Client
 	apiEndpoint      string
 	apiSecret        string
-	functionRegistry FunctionRegistry
+	functionRegistry functionRegistry
 	machineID        string
-	pingInterval     time.Duration
-	Default          *Service
+	Default          *service
 }
 
 type InferableOptions struct {
@@ -39,7 +41,7 @@ func New(options InferableOptions) (*Inferable, error) {
 	if options.APIEndpoint == "" {
 		options.APIEndpoint = DefaultAPIEndpoint
 	}
-	client, err := NewClient(ClientOptions{
+	client, err := client.NewClient(client.ClientOptions{
 		Endpoint: options.APIEndpoint,
 		Secret:   options.APISecret,
 	})
@@ -49,19 +51,16 @@ func New(options InferableOptions) (*Inferable, error) {
 
 	machineID := options.MachineID
 	if machineID == "" {
-		machineID = generateMachineID(8)
+		machineID = util.GenerateMachineID(8)
 	}
 
 	inferable := &Inferable{
 		client:           client,
 		apiEndpoint:      options.APIEndpoint,
 		apiSecret:        options.APISecret,
-		functionRegistry: FunctionRegistry{services: make(map[string]*Service)},
+		functionRegistry: functionRegistry{services: make(map[string]*service)},
 		machineID:        machineID,
-		pingInterval:     10 * time.Second,
 	}
-
-	go inferable.startPingCluster()
 
 	// Automatically register the default service
 	inferable.Default, err = inferable.RegisterService("default")
@@ -72,60 +71,11 @@ func New(options InferableOptions) (*Inferable, error) {
 	return inferable, nil
 }
 
-func (i *Inferable) startPingCluster() {
-	i.pingCluster()
-
-	ticker := time.NewTicker(i.pingInterval)
-
-	for range ticker.C {
-		i.pingCluster()
-	}
-}
-
-func (i *Inferable) pingCluster() {
-	activeServices := []string{}
-	for serviceName := range i.functionRegistry.services {
-		activeServices = append(activeServices, serviceName)
-	}
-
-	if len(activeServices) > 0 {
-		body := map[string]interface{}{
-			"services": activeServices,
-		}
-
-		jsonBody, err := json.Marshal(body)
-		if err != nil {
-			fmt.Printf("Error marshaling ping body: %v\n", err)
-			return
-		}
-
-		_, err = i.client.FetchData(FetchDataOptions{
-			Path:    "/v2/ping",
-			Method:  "POST",
-			Body:    string(jsonBody),
-			Headers: map[string]string{"Content-Type": "application/json"},
-		})
-
-		if err != nil {
-			fmt.Printf("Error pinging cluster. Will try again next interval: %v\n", err)
-		}
-	}
-}
-
-// Convenience reference to a service with name 'default'.
-func (i *Inferable) DefaultService() (*Service, error) {
-	if _, exists := i.functionRegistry.services["default"]; exists {
-		return i.functionRegistry.services["default"], nil
-	}
-
-	return nil, fmt.Errorf("default service not found")
-}
-
-func (i *Inferable) RegisterService(serviceName string) (*Service, error) {
+func (i *Inferable) RegisterService(serviceName string) (*service, error) {
 	if _, exists := i.functionRegistry.services[serviceName]; exists {
 		return nil, fmt.Errorf("service with name '%s' already registered", serviceName)
 	}
-	service := &Service{
+	service := &service{
 		Name:      serviceName,
 		Functions: make(map[string]Function),
 		inferable: i, // Set the reference to the Inferable instance
@@ -134,7 +84,7 @@ func (i *Inferable) RegisterService(serviceName string) (*Service, error) {
 	return service, nil
 }
 
-func (i *Inferable) CallFunc(serviceName, funcName string, args ...interface{}) ([]reflect.Value, error) {
+func (i *Inferable) callFunc(serviceName, funcName string, args ...interface{}) ([]reflect.Value, error) {
 	service, exists := i.functionRegistry.services[serviceName]
 	if !exists {
 		return nil, fmt.Errorf("service with name '%s' not found", serviceName)
@@ -163,7 +113,7 @@ func (i *Inferable) CallFunc(serviceName, funcName string, args ...interface{}) 
 	return fnValue.Call(inArgs), nil
 }
 
-func (i *Inferable) ToJSONDefinition() ([]byte, error) {
+func (i *Inferable) toJSONDefinition() ([]byte, error) {
 	definitions := make([]map[string]interface{}, 0)
 
 	for serviceName, service := range i.functionRegistry.services {
@@ -188,7 +138,7 @@ func (i *Inferable) ToJSONDefinition() ([]byte, error) {
 	return json.MarshalIndent(definitions, "", "  ")
 }
 
-func (i *Inferable) FetchData(options FetchDataOptions) ([]byte, error) {
+func (i *Inferable) fetchData(options client.FetchDataOptions) ([]byte, http.Header, error) {
 	// Add default Content-Type header if not present
 	if options.Headers == nil {
 		options.Headers = make(map[string]string)
@@ -197,16 +147,12 @@ func (i *Inferable) FetchData(options FetchDataOptions) ([]byte, error) {
 		options.Headers["Content-Type"] = "application/json"
 	}
 
-	data, err := i.client.FetchData(options)
-	return []byte(data), err
+	data, headers, err := i.client.FetchData(options)
+	return []byte(data), headers, err
 }
 
-func (i *Inferable) GetMachineID() string {
-	return i.machineID
-}
-
-func (i *Inferable) ServerOk() error {
-	data, err := i.client.FetchData(FetchDataOptions{
+func (i *Inferable) serverOk() error {
+	data, _, err := i.client.FetchData(client.FetchDataOptions{
 		Path:   "/live",
 		Method: "GET",
 	})

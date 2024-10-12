@@ -4,9 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
+	"sort"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,12 +64,12 @@ func TestCallFunc(t *testing.T) {
 		Name: "TestFunc",
 	})
 
-	result, err := i.CallFunc("default", "TestFunc", TestInput{A: 2, B: 3})
+	result, err := i.callFunc("default", "TestFunc", TestInput{A: 2, B: 3})
 	require.NoError(t, err)
 	assert.Equal(t, 5, result[0].Interface())
 
 	// Test calling non-existent function
-	_, err = i.CallFunc("TestService", "NonExistentFunc")
+	_, err = i.callFunc("TestService", "NonExistentFunc")
 	assert.Error(t, err)
 }
 
@@ -93,17 +92,30 @@ func TestToJSONDefinition(t *testing.T) {
 		Description: "Test function",
 	})
 
-	jsonDef, err := i.ToJSONDefinition()
+	jsonDef, err := i.toJSONDefinition()
 	require.NoError(t, err)
 
 	var definitions []map[string]interface{}
 	err = json.Unmarshal(jsonDef, &definitions)
 	require.NoError(t, err)
 
+	// Log the definitions
+	t.Log(string(jsonDef))
+	assert.Len(t, definitions, 2)
+	// Sort by service name
+
+	sort.Slice(definitions, func(i, j int) bool {
+		return definitions[i]["service"].(string) > definitions[j]["service"].(string)
+	})
+
+	assert.Equal(t, "default", definitions[0]["service"])
 	assert.Equal(t, "TestService", definitions[1]["service"])
+
 	functions := definitions[1]["functions"].([]interface{})
+
 	assert.Len(t, functions, 1)
 	funcDef := functions[0].(map[string]interface{})
+
 	assert.Equal(t, "TestFunc", funcDef["name"])
 	assert.Equal(t, "Test function", funcDef["description"])
 }
@@ -122,7 +134,7 @@ func TestServerOk(t *testing.T) {
 		APIEndpoint: server.URL,
 		APISecret:   "test-secret",
 	})
-	err := i.ServerOk()
+	err := i.serverOk()
 	assert.NoError(t, err)
 }
 
@@ -131,7 +143,7 @@ func TestGetMachineID(t *testing.T) {
 		APIEndpoint: DefaultAPIEndpoint,
 		APISecret:   "test-secret",
 	})
-	machineID := i.GetMachineID()
+	machineID := i.machineID
 	assert.NotEmpty(t, machineID)
 
 	// Check if the machine ID is persistent
@@ -139,7 +151,7 @@ func TestGetMachineID(t *testing.T) {
 		APIEndpoint: DefaultAPIEndpoint,
 		APISecret:   "test-secret",
 	})
-	assert.Equal(t, machineID, i2.GetMachineID())
+	assert.Equal(t, machineID, i2.machineID)
 }
 
 func TestGetSchema(t *testing.T) {
@@ -173,7 +185,7 @@ func TestGetSchema(t *testing.T) {
 		Name: "TestFunc2",
 	})
 
-	schema, err := service.GetSchema()
+	schema, err := service.getSchema()
 	require.NoError(t, err)
 	assert.Equal(t, "TestFunc", schema["TestFunc"].(map[string]interface{})["name"])
 	assert.Equal(t, "TestFunc2", schema["TestFunc2"].(map[string]interface{})["name"])
@@ -215,64 +227,4 @@ func TestGetSchema(t *testing.T) {
         }
     }`
 	assert.JSONEq(t, expectedJSON, string(schemaJSON))
-}
-
-func TestPingCluster(t *testing.T) {
-	pingCount := 0
-
-	// Create a mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check if the request is a POST to /v2/ping
-		if r.Method != "POST" || r.URL.Path != "/v2/ping" {
-			t.Errorf("Expected POST request to /v2/ping, got %s request to %s", r.Method, r.URL.Path)
-		}
-
-		// Check the Content-Type header
-		contentType := r.Header.Get("Content-Type")
-		if contentType != "application/json" {
-			t.Errorf("Expected Content-Type header to be application/json, got %s", contentType)
-		}
-
-		// Read and parse the request body
-		var body map[string]interface{}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("Failed to decode request body: %v", err)
-		}
-
-		// Check if the services field is present and is an array
-		services, ok := body["services"].([]interface{})
-		if !ok {
-			t.Errorf("Expected 'services' field to be an array, got %T", body["services"])
-		}
-
-		if !reflect.DeepEqual(services, []interface{}{"default", "testService"}) {
-			t.Errorf("Expected services array to contain ['default', 'testService'], got %v", services)
-
-		}
-
-		// Send a successful response
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
-		pingCount++
-	}))
-	defer server.Close()
-
-	// Create a new Inferable instance with the mock server
-	inferable, err := New(InferableOptions{
-		APIEndpoint: server.URL,
-		APISecret:   "test-secret",
-	})
-	if err != nil {
-		t.Fatalf("Failed to create Inferable instance: %v", err)
-	}
-
-	// Register a test service
-	_, err = inferable.RegisterService("testService")
-	if err != nil {
-		t.Fatalf("Failed to register service: %v", err)
-	}
-
-	// wait 2s. pingCluster should have been called at least once
-	time.Sleep(2 * time.Second)
-	assert.Greater(t, pingCount, 0)
 }

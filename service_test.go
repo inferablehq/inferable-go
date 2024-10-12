@@ -3,24 +3,25 @@ package inferable
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"testing"
-	"time"
 
 	"bytes"
 	"net/http"
 
-	"github.com/joho/godotenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+  "github.com/inferablehq/inferable-go/internal/util"
 )
 
 func TestRegisterFunc(t *testing.T) {
+	_, _, _, apiEndpoint := util.GetTestVars()
+
 	i, _ := New(InferableOptions{
-		APIEndpoint: DefaultAPIEndpoint,
+		APIEndpoint: apiEndpoint,
 		APISecret:   "test-secret",
 	})
-	service, _ := i.RegisterService("TestService")
+	service, _ := i.RegisterService("TestService1")
 
 	type TestInput struct {
 		A int `json:"a"`
@@ -52,30 +53,20 @@ func TestRegisterFunc(t *testing.T) {
 }
 
 func TestRegistrationAndConfig(t *testing.T) {
-	// Load environment variables
-	if os.Getenv("INFERABLE_API_SECRET") == "" {
-		err := godotenv.Load("./.env")
+	machineSecret, _, _, apiEndpoint := util.GetTestVars()
 
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	apiSecret := os.Getenv("INFERABLE_API_SECRET")
 	machineID := "random-machine-id"
-
-	require.NotEmpty(t, apiSecret, "INFERABLE_API_SECRET is not set in .env")
 
 	// Create a new Inferable instance
 	i, err := New(InferableOptions{
-		APIEndpoint: DefaultAPIEndpoint,
-		APISecret:   apiSecret,
+		APIEndpoint: apiEndpoint,
+		APISecret:   machineSecret,
 		MachineID:   machineID,
 	})
 	require.NoError(t, err)
 
 	// Register a service
-	service, err := i.RegisterService("TestService")
+	service, err := i.RegisterService("TestService1")
 	require.NoError(t, err)
 
 	// Register a test function
@@ -102,42 +93,23 @@ func TestRegistrationAndConfig(t *testing.T) {
 	// Call Listen to trigger registration
 	err = service.Start()
 	require.NoError(t, err)
-
-	// Get the config and check the details
-	config := service.GetConfig()
-
-	// Verify non-sensitive information
-	assert.NotEmpty(t, config.QueueURL)
-	assert.NotEmpty(t, config.Region)
-	assert.True(t, config.Enabled)
-	assert.True(t, config.Expiration.After(time.Now()))
 }
 
 func TestErrorneousRegistration(t *testing.T) {
-	// Load environment variables
-	if os.Getenv("INFERABLE_API_SECRET") == "" {
-		err := godotenv.Load("./.env")
+	machineSecret, _, _, apiEndpoint := util.GetTestVars()
 
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	apiSecret := os.Getenv("INFERABLE_API_SECRET")
 	machineID := "random-machine-id"
-
-	require.NotEmpty(t, apiSecret, "INFERABLE_API_SECRET is not set in .env")
 
 	// Create a new Inferable instance
 	i, err := New(InferableOptions{
-		APIEndpoint: os.Getenv("INFERABLE_API_ENDPOINT"),
-		APISecret:   apiSecret,
+		APIEndpoint: apiEndpoint,
+		APISecret:   machineSecret,
 		MachineID:   machineID,
 	})
 	require.NoError(t, err)
 
 	// Register a service
-	service, err := i.RegisterService("TestService")
+	service, err := i.RegisterService("TestService1")
 	require.NoError(t, err)
 
 	type F struct {
@@ -167,28 +139,20 @@ func TestErrorneousRegistration(t *testing.T) {
 }
 
 func TestServiceStartAndReceiveMessage(t *testing.T) {
-	if os.Getenv("INFERABLE_API_SECRET") == "" {
-		err := godotenv.Load("./.env")
-		require.NoError(t, err, "Error loading .env file")
-	}
+	machineSecret, consumeSecret, clusterId, apiEndpoint := util.GetTestVars()
 
-	machineID := os.Getenv("INFERABLE_MACHINE_ID")
-	apiSecret := os.Getenv("INFERABLE_API_SECRET")
-	clusterId := os.Getenv("INFERABLE_CLUSTER_ID")
-
-	require.NotEmpty(t, apiSecret, "INFERABLE_API_SECRET is not set in .env")
-	require.NotEmpty(t, clusterId, "INFERABLE_CLUSTER_ID is not set in .env")
+	machineID := "random-machine-id"
 
 	// Create a new Inferable instance
 	i, err := New(InferableOptions{
-		APIEndpoint: DefaultAPIEndpoint,
-		APISecret:   apiSecret,
+		APIEndpoint: apiEndpoint,
+		APISecret:   machineSecret,
 		MachineID:   machineID,
 	})
 	require.NoError(t, err)
 
 	// Register a service
-	service, err := i.RegisterService("TestService")
+	service, err := i.RegisterService("TestServiceSuccess")
 	require.NoError(t, err)
 
 	// Register a test function
@@ -214,9 +178,9 @@ func TestServiceStartAndReceiveMessage(t *testing.T) {
 
 	// Use executeJobSync to invoke the function
 	testMessage := "Hello, SQS!"
-	executeJobSyncURL := fmt.Sprintf("https://api.inferable.ai/clusters/%s/execute", clusterId)
+	executeCallUrl := fmt.Sprintf("%s/clusters/%s/calls?waitTime=20", apiEndpoint, clusterId)
 	payload := map[string]interface{}{
-		"service":  "TestService",
+		"service":  "TestServiceSuccess",
 		"function": "TestFunc",
 		"input": map[string]string{
 			"message": testMessage,
@@ -226,11 +190,11 @@ func TestServiceStartAndReceiveMessage(t *testing.T) {
 	jsonPayload, err := json.Marshal(payload)
 	require.NoError(t, err)
 
-	req, err := http.NewRequest("POST", executeJobSyncURL, bytes.NewBuffer(jsonPayload))
+	req, err := http.NewRequest("POST", executeCallUrl, bytes.NewBuffer(jsonPayload))
 	require.NoError(t, err)
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiSecret)
+	req.Header.Set("Authorization", "Bearer "+consumeSecret)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -246,4 +210,81 @@ func TestServiceStartAndReceiveMessage(t *testing.T) {
 	// Check if the job was executed successfully
 	require.Equal(t, "resolution", result["resultType"])
 	require.Equal(t, "success", result["status"])
+  require.Equal(t, "Received: Hello, SQS!", result["result"])
+}
+
+func TestServiceStartAndReceiveFailingMessage(t *testing.T) {
+	machineSecret, consumeSecret, clusterId, apiEndpoint := util.GetTestVars()
+
+	machineID := "random-machine-id"
+
+	// Create a new Inferable instance
+	i, err := New(InferableOptions{
+		APIEndpoint: apiEndpoint,
+		APISecret:   machineSecret,
+		MachineID:   machineID,
+	})
+	require.NoError(t, err)
+
+	// Register a service
+	service, err := i.RegisterService("TestServiceFail")
+	require.NoError(t, err)
+
+	// Register a test function
+	type TestInput struct {
+		Message string `json:"message"`
+	}
+
+  // Purposfuly failing function
+	testFailingFunc := func(input TestInput) (*string, error) { return nil, fmt.Errorf("test error") }
+
+	err = service.RegisterFunc(Function{
+		Func:        testFailingFunc,
+		Name:        "FailingFunc",
+		Description: "Test function",
+	})
+	require.NoError(t, err)
+
+	// Start the service
+	err = service.Start()
+	require.NoError(t, err)
+
+	// Ensure the service is stopped at the end of the test
+	defer service.Stop()
+
+	// Use executeJobSync to invoke the function
+	testMessage := "Hello, SQS!"
+	executeCallUrl := fmt.Sprintf("%s/clusters/%s/calls?waitTime=20", apiEndpoint, clusterId)
+	payload := map[string]interface{}{
+		"service":  "TestServiceFail",
+		"function": "FailingFunc",
+		"input": map[string]string{
+			"message": testMessage,
+		},
+	}
+
+	jsonPayload, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	req, err := http.NewRequest("POST", executeCallUrl, bytes.NewBuffer(jsonPayload))
+	require.NoError(t, err)
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+consumeSecret)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+
+	// Check if the job was executed successfully
+	require.Equal(t, "rejection", result["resultType"])
+	require.Equal(t, "success", result["status"])
+  require.Equal(t, "test error", result["result"])
 }
