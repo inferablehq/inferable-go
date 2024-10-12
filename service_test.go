@@ -21,7 +21,7 @@ func TestRegisterFunc(t *testing.T) {
 		APIEndpoint: apiEndpoint,
 		APISecret:   "test-secret",
 	})
-	service, _ := i.RegisterService("TestService")
+	service, _ := i.RegisterService("TestService1")
 
 	type TestInput struct {
 		A int `json:"a"`
@@ -66,7 +66,7 @@ func TestRegistrationAndConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	// Register a service
-	service, err := i.RegisterService("TestService")
+	service, err := i.RegisterService("TestService1")
 	require.NoError(t, err)
 
 	// Register a test function
@@ -109,7 +109,7 @@ func TestErrorneousRegistration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Register a service
-	service, err := i.RegisterService("TestService")
+	service, err := i.RegisterService("TestService1")
 	require.NoError(t, err)
 
 	type F struct {
@@ -152,7 +152,7 @@ func TestServiceStartAndReceiveMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	// Register a service
-	service, err := i.RegisterService("TestService")
+	service, err := i.RegisterService("TestServiceSuccess")
 	require.NoError(t, err)
 
 	// Register a test function
@@ -180,7 +180,7 @@ func TestServiceStartAndReceiveMessage(t *testing.T) {
 	testMessage := "Hello, SQS!"
 	executeCallUrl := fmt.Sprintf("%s/clusters/%s/calls?waitTime=20", apiEndpoint, clusterId)
 	payload := map[string]interface{}{
-		"service":  "TestService",
+		"service":  "TestServiceSuccess",
 		"function": "TestFunc",
 		"input": map[string]string{
 			"message": testMessage,
@@ -210,4 +210,81 @@ func TestServiceStartAndReceiveMessage(t *testing.T) {
 	// Check if the job was executed successfully
 	require.Equal(t, "resolution", result["resultType"])
 	require.Equal(t, "success", result["status"])
+  require.Equal(t, "Received: Hello, SQS!", result["result"])
+}
+
+func TestServiceStartAndReceiveFailingMessage(t *testing.T) {
+	machineSecret, consumeSecret, clusterId, apiEndpoint := util.GetTestVars()
+
+	machineID := "random-machine-id"
+
+	// Create a new Inferable instance
+	i, err := New(InferableOptions{
+		APIEndpoint: apiEndpoint,
+		APISecret:   machineSecret,
+		MachineID:   machineID,
+	})
+	require.NoError(t, err)
+
+	// Register a service
+	service, err := i.RegisterService("TestServiceFail")
+	require.NoError(t, err)
+
+	// Register a test function
+	type TestInput struct {
+		Message string `json:"message"`
+	}
+
+  // Purposfuly failing function
+	testFailingFunc := func(input TestInput) (*string, error) { return nil, fmt.Errorf("test error") }
+
+	err = service.RegisterFunc(Function{
+		Func:        testFailingFunc,
+		Name:        "FailingFunc",
+		Description: "Test function",
+	})
+	require.NoError(t, err)
+
+	// Start the service
+	err = service.Start()
+	require.NoError(t, err)
+
+	// Ensure the service is stopped at the end of the test
+	defer service.Stop()
+
+	// Use executeJobSync to invoke the function
+	testMessage := "Hello, SQS!"
+	executeCallUrl := fmt.Sprintf("%s/clusters/%s/calls?waitTime=20", apiEndpoint, clusterId)
+	payload := map[string]interface{}{
+		"service":  "TestServiceFail",
+		"function": "FailingFunc",
+		"input": map[string]string{
+			"message": testMessage,
+		},
+	}
+
+	jsonPayload, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	req, err := http.NewRequest("POST", executeCallUrl, bytes.NewBuffer(jsonPayload))
+	require.NoError(t, err)
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+consumeSecret)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+
+	// Check if the job was executed successfully
+	require.Equal(t, "rejection", result["resultType"])
+	require.Equal(t, "success", result["status"])
+  require.Equal(t, "test error", result["result"])
 }

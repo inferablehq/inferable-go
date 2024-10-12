@@ -185,7 +185,7 @@ func TestGetSchema(t *testing.T) {
 		Name: "TestFunc2",
 	})
 
-	schema, err := service.GetSchema()
+	schema, err := service.getSchema()
 	require.NoError(t, err)
 	assert.Equal(t, "TestFunc", schema["TestFunc"].(map[string]interface{})["name"])
 	assert.Equal(t, "TestFunc2", schema["TestFunc2"].(map[string]interface{})["name"])

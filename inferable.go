@@ -4,9 +4,11 @@ package inferable
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"reflect"
-  "github.com/inferablehq/inferable-go/internal/client"
-  "github.com/inferablehq/inferable-go/internal/util"
+
+	"github.com/inferablehq/inferable-go/internal/client"
+	"github.com/inferablehq/inferable-go/internal/util"
 )
 
 // Version of the inferable package
@@ -17,7 +19,7 @@ const (
 )
 
 type functionRegistry struct {
-	services map[string]*Service
+	services map[string]*service
 }
 
 type Inferable struct {
@@ -26,7 +28,7 @@ type Inferable struct {
 	apiSecret        string
 	functionRegistry functionRegistry
 	machineID        string
-	Default          *Service
+	Default          *service
 }
 
 type InferableOptions struct {
@@ -56,7 +58,7 @@ func New(options InferableOptions) (*Inferable, error) {
 		client:           client,
 		apiEndpoint:      options.APIEndpoint,
 		apiSecret:        options.APISecret,
-		functionRegistry: functionRegistry{services: make(map[string]*Service)},
+		functionRegistry: functionRegistry{services: make(map[string]*service)},
 		machineID:        machineID,
 	}
 
@@ -69,11 +71,11 @@ func New(options InferableOptions) (*Inferable, error) {
 	return inferable, nil
 }
 
-func (i *Inferable) RegisterService(serviceName string) (*Service, error) {
+func (i *Inferable) RegisterService(serviceName string) (*service, error) {
 	if _, exists := i.functionRegistry.services[serviceName]; exists {
 		return nil, fmt.Errorf("service with name '%s' already registered", serviceName)
 	}
-	service := &Service{
+	service := &service{
 		Name:      serviceName,
 		Functions: make(map[string]Function),
 		inferable: i, // Set the reference to the Inferable instance
@@ -136,7 +138,7 @@ func (i *Inferable) toJSONDefinition() ([]byte, error) {
 	return json.MarshalIndent(definitions, "", "  ")
 }
 
-func (i *Inferable) fetchData(options client.FetchDataOptions) ([]byte, error) {
+func (i *Inferable) fetchData(options client.FetchDataOptions) ([]byte, http.Header, error) {
 	// Add default Content-Type header if not present
 	if options.Headers == nil {
 		options.Headers = make(map[string]string)
@@ -145,12 +147,12 @@ func (i *Inferable) fetchData(options client.FetchDataOptions) ([]byte, error) {
 		options.Headers["Content-Type"] = "application/json"
 	}
 
-	data, err := i.client.FetchData(options)
-	return []byte(data), err
+	data, headers, err := i.client.FetchData(options)
+	return []byte(data), headers, err
 }
 
 func (i *Inferable) serverOk() error {
-	data, err := i.client.FetchData(client.FetchDataOptions{
+	data, _, err := i.client.FetchData(client.FetchDataOptions{
 		Path:   "/live",
 		Method: "GET",
 	})

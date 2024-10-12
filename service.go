@@ -6,22 +6,19 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/invopop/jsonschema"
 
-  "github.com/inferablehq/inferable-go/internal/client"
+	"github.com/inferablehq/inferable-go/internal/client"
 )
 
-type Service struct {
-	Name      string
-	Functions map[string]Function
-	inferable *Inferable
-	clusterId string
-	ctx       context.Context
-	cancel    context.CancelFunc
-}
+const (
+  MaxConsecutivePollFailures = 50
+  DefaultRetryAfter = 10
+)
 
 type Function struct {
 	Name        string
@@ -31,13 +28,33 @@ type Function struct {
 	Func        interface{}
 }
 
-type CallMessage struct {
+type service struct {
+	Name       string
+	Functions  map[string]Function
+	inferable  *Inferable
+	clusterId  string
+	ctx        context.Context
+	cancel     context.CancelFunc
+  retryAfter int
+}
+
+type callMessage struct {
 	Id       string      `json:"id"`
 	Function string      `json:"function"`
 	Input    interface{} `json:"input"`
 }
 
-func (s *Service) RegisterFunc(fn Function) error {
+type resultMetadata struct {
+	FunctionExecutionTime int64 `json:"functionExecutionTime,omitempty"`
+}
+
+type result struct {
+	Result     interface{}    `json:"result"`
+	ResultType string         `json:"resultType"`
+	Meta       resultMetadata `json:"meta"`
+}
+
+func (s *service) RegisterFunc(fn Function) error {
 	if _, exists := s.Functions[fn.Name]; exists {
 		return fmt.Errorf("function with name '%s' already registered for service '%s'", fn.Name, s.Name)
 	}
@@ -82,7 +99,7 @@ func (s *Service) RegisterFunc(fn Function) error {
 	return nil
 }
 
-func (s *Service) registerMachine() error {
+func (s *service) registerMachine() error {
 	// Check if there are any registered functions
 	if len(s.Functions) == 0 {
 		return fmt.Errorf("cannot register service '%s': no functions registered", s.Name)
@@ -140,7 +157,7 @@ func (s *Service) registerMachine() error {
 		Body:    string(jsonPayload),
 	}
 
-	responseData, err := s.inferable.fetchData(options)
+	responseData, _, err := s.inferable.fetchData(options)
 	if err != nil {
 		return fmt.Errorf("failed to register machine: %v", err)
 	}
@@ -161,44 +178,53 @@ func (s *Service) registerMachine() error {
 }
 
 // Start initializes the service, registers the machine, and starts polling for messages
-func (s *Service) Start() error {
+func (s *service) Start() error {
 	err := s.registerMachine()
 	if err != nil {
 		return fmt.Errorf("failed to register machine: %v", err)
 	}
 
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+  s.retryAfter = 0
 
-	// Creat a run loop
-	go func() {
-		for {
-			select {
-			case <-s.ctx.Done():
-				return
-			default:
-				// TODO: Retry-after
-				// TODO: Error count
-				err := s.poll()
-				if err != nil {
-					log.Printf("Failed to poll: %v", err)
-				}
-			}
-		}
-	}()
+  go func() {
+    failureCount := DefaultRetryAfter
+    for {
+      time.Sleep(time.Duration(s.retryAfter) * time.Second)
+
+      select {
+      case <-s.ctx.Done():
+        return
+      default:
+        err := s.poll()
+
+        if err != nil {
+          failureCount++
+
+          if failureCount > MaxConsecutivePollFailures {
+            log.Printf("Too many consecutive poll failures, exiting service: %s", s.Name)
+            s.Stop()
+          }
+
+          log.Printf("Failed to poll: %v", err)
+        }
+      }
+    }
+  }()
 
 	log.Printf("Service '%s' started and polling for messages", s.Name)
 	return nil
 }
 
 // Stop stops the service and cancels the polling
-func (s *Service) Stop() {
+func (s *service) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 		log.Printf("Service '%s' stopped", s.Name)
 	}
 }
 
-func (s *Service) poll() error {
+func (s *service) poll() error {
 	headers := map[string]string{
 		"Authorization":          "Bearer " + s.inferable.apiSecret,
 		"X-Machine-ID":           s.inferable.machineID,
@@ -212,19 +238,29 @@ func (s *Service) poll() error {
 		Headers: headers,
 	}
 
-	result, err := s.inferable.fetchData(options)
+	result, respHeaders, err := s.inferable.fetchData(options)
 	if err != nil {
 		return fmt.Errorf("failed to poll calls: %v", err)
 	}
 
-	parsed := []CallMessage{}
+  // log headers
+  for k, v := range respHeaders {
+    log.Printf("%s: %s", k, v)
+  }
+  if retryAfter, ok := respHeaders["Retry-After"]; ok {
+    for _, v := range retryAfter {
+      if i, err := strconv.Atoi(v); err == nil {
+        s.retryAfter = i
+      }
+    }
+  }
+
+	parsed := []callMessage{}
 
 	err = json.Unmarshal(result, &parsed)
 	if err != nil {
 		return fmt.Errorf("failed to parse poll response: %v", err)
 	}
-
-	log.Printf("Polled for messages: %v", parsed)
 
 	errors := []string{}
 	for _, msg := range parsed {
@@ -241,36 +277,52 @@ func (s *Service) poll() error {
 	return nil
 }
 
-func (s *Service) handleMessage(msg CallMessage) error {
-	log.Printf("Received message: %s", msg.Id)
-
+func (s *service) handleMessage(msg callMessage) error {
 	// Find the target function
 	fn, ok := s.Functions[msg.Function]
 	if !ok {
 		return fmt.Errorf("function not found: %s", msg.Function)
 	}
 
-	// Create a new instance of the function's input type
-	fnType := reflect.TypeOf(fn.Func)
-	argType := fnType.In(0)
-	argPtr := reflect.New(argType)
+  // Create a new instance of the function's input type
+  fnType := reflect.TypeOf(fn.Func)
+  argType := fnType.In(0)
+  argPtr := reflect.New(argType)
 
-	// // Unmarshal the value JSON into the function's input type
-	// if err := json.Unmarshal(valueJSON, argPtr.Interface()); err != nil {
-	// 	return fmt.Errorf("failed to unmarshal value into function argument: %v", err)
-	// }
+  inputJson, err := json.Marshal(msg.Input)
 
+  if err != nil {
+    return fmt.Errorf("failed to marshal input: %v", err)
+  }
+
+  err = json.Unmarshal(inputJson, argPtr.Interface())
+  if err != nil {
+    return fmt.Errorf("failed to unmarshal input: %v", err)
+  }
+
+
+	start := time.Now()
 	// Call the function with the unmarshaled argument
 	fnValue := reflect.ValueOf(fn.Func)
 	returnValues := fnValue.Call([]reflect.Value{argPtr.Elem()})
 
-	log.Printf("Function '%s' called successfully", fn.Name)
+  resultType := "resolution"
+  resultValue := returnValues[0].Interface()
 
-	start := time.Now()
-	result := Result{
-		Result:     returnValues[0].Interface(),
-		ResultType: "resolution",
-		Meta: ResultMetadata{
+  // Check if ANY of the return values is an error
+  for _, v := range returnValues {
+    if v.Type().AssignableTo(reflect.TypeOf((*error)(nil)).Elem()) && v.Interface() != nil {
+      resultType = "rejection"
+      // Serialize the error
+      resultValue = v.Interface().(error).Error()
+      break
+    }
+  }
+
+	result := result{
+		Result:     resultValue,
+		ResultType: resultType,
+		Meta: resultMetadata{
 			FunctionExecutionTime: int64(time.Since(start).Milliseconds()),
 		},
 	}
@@ -283,17 +335,7 @@ func (s *Service) handleMessage(msg CallMessage) error {
 	return nil
 }
 
-type ResultMetadata struct {
-	FunctionExecutionTime int64 `json:"functionExecutionTime,omitempty"`
-}
-
-type Result struct {
-	Result     interface{}    `json:"result"`
-	ResultType string         `json:"resultType"`
-	Meta       ResultMetadata `json:"meta"`
-}
-
-func (s *Service) persistJobResult(jobID string, result Result) error {
+func (s *service) persistJobResult(jobID string, result result) error {
 	payloadJSON, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload for persistJobResult: %v", err)
@@ -313,7 +355,7 @@ func (s *Service) persistJobResult(jobID string, result Result) error {
 		Body:    string(payloadJSON),
 	}
 
-	_, err = s.inferable.fetchData(options)
+	_, _, err = s.inferable.fetchData(options)
 	if err != nil {
 		return fmt.Errorf("failed to persist job result: %v", err)
 	}
@@ -321,7 +363,7 @@ func (s *Service) persistJobResult(jobID string, result Result) error {
 	return nil
 }
 
-func (s *Service) GetSchema() (map[string]interface{}, error) {
+func (s *service) getSchema() (map[string]interface{}, error) {
 	if len(s.Functions) == 0 {
 		return nil, fmt.Errorf("no functions registered for service '%s'", s.Name)
 	}
@@ -336,4 +378,8 @@ func (s *Service) GetSchema() (map[string]interface{}, error) {
 	}
 
 	return schema, nil
+}
+
+func (s *service) isPolling() bool {
+  return s.cancel != nil
 }
