@@ -2,6 +2,8 @@ package inferable
 
 import (
 	"testing"
+
+  "github.com/inferablehq/inferable-go/internal/util"
 )
 
 type EchoInput struct {
@@ -25,7 +27,7 @@ func reverse(input ReverseInput) string {
 }
 
 func TestInferableFunctions(t *testing.T) {
-	machineSecret, _, _, apiEndpoint := getTestVars()
+	machineSecret, _, _, apiEndpoint := util.GetTestVars()
 
 	inferableInstance, err := New(InferableOptions{
 		APIEndpoint: apiEndpoint,
@@ -58,7 +60,7 @@ func TestInferableFunctions(t *testing.T) {
 		t.Fatalf("Error registering reverse function: %v", err)
 	}
 
-	jsonDef, err := inferableInstance.ToJSONDefinition()
+	jsonDef, err := inferableInstance.toJSONDefinition()
 	if err != nil {
 		t.Fatalf("Error generating JSON definition: %v", err)
 	}
@@ -66,7 +68,7 @@ func TestInferableFunctions(t *testing.T) {
 
 	t.Run("Echo Function", func(t *testing.T) {
 		testInput := EchoInput{Input: "Hello, Inferable!"}
-		result, err := inferableInstance.CallFunc("string_operations", "echo", testInput)
+		result, err := inferableInstance.callFunc("string_operations", "echo", testInput)
 		if err != nil {
 			t.Fatalf("Error calling echo function: %v", err)
 		}
@@ -83,7 +85,7 @@ func TestInferableFunctions(t *testing.T) {
 
 	t.Run("Reverse Function", func(t *testing.T) {
 		testInput := ReverseInput{Input: "Hello, Inferable!"}
-		result, err := inferableInstance.CallFunc("string_operations", "reverse", testInput)
+		result, err := inferableInstance.callFunc("string_operations", "reverse", testInput)
 		if err != nil {
 			t.Fatalf("Error calling reverse function: %v", err)
 		}
@@ -99,7 +101,7 @@ func TestInferableFunctions(t *testing.T) {
 	})
 
 	t.Run("Server Health Check", func(t *testing.T) {
-		err := inferableInstance.ServerOk()
+		err := inferableInstance.serverOk()
 		if err != nil {
 			t.Fatalf("Server health check failed: %v", err)
 		}
@@ -107,7 +109,7 @@ func TestInferableFunctions(t *testing.T) {
 	})
 
 	t.Run("Machine ID Generation", func(t *testing.T) {
-		machineID := inferableInstance.GetMachineID()
+		machineID := inferableInstance.machineID
 		if machineID == "" {
 			t.Error("Machine ID is empty")
 		}
@@ -115,7 +117,7 @@ func TestInferableFunctions(t *testing.T) {
 	})
 
 	t.Run("Machine ID Consistency", func(t *testing.T) {
-		machineSecret, _, _, apiEndpoint := getTestVars()
+		machineSecret, _, _, apiEndpoint := util.GetTestVars()
 
 		instance1, err := New(InferableOptions{
 			APIEndpoint: apiEndpoint,
@@ -124,7 +126,7 @@ func TestInferableFunctions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Error creating first Inferable instance: %v", err)
 		}
-		id1 := instance1.GetMachineID()
+		id1 := instance1.machineID
 
 		instance2, err := New(InferableOptions{
 			APIEndpoint: apiEndpoint,
@@ -133,7 +135,7 @@ func TestInferableFunctions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Error creating second Inferable instance: %v", err)
 		}
-		id2 := instance2.GetMachineID()
+		id2 := instance2.machineID
 
 		if id1 != id2 {
 			t.Errorf("Machine IDs are not consistent. First: %s, Second: %s", id1, id2)

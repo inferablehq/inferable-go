@@ -64,12 +64,12 @@ func TestCallFunc(t *testing.T) {
 		Name: "TestFunc",
 	})
 
-	result, err := i.CallFunc("default", "TestFunc", TestInput{A: 2, B: 3})
+	result, err := i.callFunc("default", "TestFunc", TestInput{A: 2, B: 3})
 	require.NoError(t, err)
 	assert.Equal(t, 5, result[0].Interface())
 
 	// Test calling non-existent function
-	_, err = i.CallFunc("TestService", "NonExistentFunc")
+	_, err = i.callFunc("TestService", "NonExistentFunc")
 	assert.Error(t, err)
 }
 
@@ -92,7 +92,7 @@ func TestToJSONDefinition(t *testing.T) {
 		Description: "Test function",
 	})
 
-	jsonDef, err := i.ToJSONDefinition()
+	jsonDef, err := i.toJSONDefinition()
 	require.NoError(t, err)
 
 	var definitions []map[string]interface{}
@@ -134,7 +134,7 @@ func TestServerOk(t *testing.T) {
 		APIEndpoint: server.URL,
 		APISecret:   "test-secret",
 	})
-	err := i.ServerOk()
+	err := i.serverOk()
 	assert.NoError(t, err)
 }
 
@@ -143,7 +143,7 @@ func TestGetMachineID(t *testing.T) {
 		APIEndpoint: DefaultAPIEndpoint,
 		APISecret:   "test-secret",
 	})
-	machineID := i.GetMachineID()
+	machineID := i.machineID
 	assert.NotEmpty(t, machineID)
 
 	// Check if the machine ID is persistent
@@ -151,7 +151,7 @@ func TestGetMachineID(t *testing.T) {
 		APIEndpoint: DefaultAPIEndpoint,
 		APISecret:   "test-secret",
 	})
-	assert.Equal(t, machineID, i2.GetMachineID())
+	assert.Equal(t, machineID, i2.machineID)
 }
 
 func TestGetSchema(t *testing.T) {

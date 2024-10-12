@@ -1,4 +1,4 @@
-package inferable
+package client
 
 import (
 	"fmt"

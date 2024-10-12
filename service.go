@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/invopop/jsonschema"
+
+  "github.com/inferablehq/inferable-go/internal/client"
 )
 
 type Service struct {
@@ -131,14 +133,14 @@ func (s *Service) registerMachine() error {
 	}
 
 	// Call the registerMachine endpoint
-	options := FetchDataOptions{
+	options := client.FetchDataOptions{
 		Path:    "/machines",
 		Method:  "POST",
 		Headers: headers,
 		Body:    string(jsonPayload),
 	}
 
-	responseData, err := s.inferable.FetchData(options)
+	responseData, err := s.inferable.fetchData(options)
 	if err != nil {
 		return fmt.Errorf("failed to register machine: %v", err)
 	}
@@ -204,13 +206,13 @@ func (s *Service) poll() error {
 		"X-Machine-SDK-Language": "go",
 	}
 
-	options := FetchDataOptions{
+	options := client.FetchDataOptions{
 		Path:    fmt.Sprintf("/clusters/%s/calls?acknowledge=true&service=%s&status=pending&limit=10", s.clusterId, s.Name),
 		Method:  "GET",
 		Headers: headers,
 	}
 
-	result, err := s.inferable.FetchData(options)
+	result, err := s.inferable.fetchData(options)
 	if err != nil {
 		return fmt.Errorf("failed to poll calls: %v", err)
 	}
@@ -304,14 +306,14 @@ func (s *Service) persistJobResult(jobID string, result Result) error {
 		"X-Machine-SDK-Language": "go",
 	}
 
-	options := FetchDataOptions{
+	options := client.FetchDataOptions{
 		Path:    fmt.Sprintf("/clusters/%s/calls/%s/result", s.clusterId, jobID),
 		Method:  "POST",
 		Headers: headers,
 		Body:    string(payloadJSON),
 	}
 
-	_, err = s.inferable.FetchData(options)
+	_, err = s.inferable.fetchData(options)
 	if err != nil {
 		return fmt.Errorf("failed to persist job result: %v", err)
 	}

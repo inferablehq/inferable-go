@@ -1,4 +1,4 @@
-package inferable
+package util
 
 import (
 	"crypto/sha256"
@@ -10,9 +10,11 @@ import (
 	"strings"
 )
 
-const MachineIDFile = "inferable_machine_id.json"
+const (
+  MachineIDFile = "inferable_machine_id.json"
+)
 
-func getMachineID() string {
+func GetMachineID() string {
 	hostname, _ := os.Hostname()
 	cpuInfo := runtime.GOARCH + runtime.GOOS + runtime.Version()
 	machineID := hostname + cpuInfo
@@ -21,8 +23,8 @@ func getMachineID() string {
 	return hex.EncodeToString(hash[:])
 }
 
-func generateMachineID(length int) string {
-	machineID := getMachineID()
+func GenerateMachineID(length int) string {
+	machineID := GetMachineID()
 	seed := int64(0)
 	for _, char := range machineID {
 		seed += int64(char)

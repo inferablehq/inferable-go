@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+  "github.com/inferablehq/inferable-go/internal/client"
+  "github.com/inferablehq/inferable-go/internal/util"
 )
 
 // Version of the inferable package
@@ -14,15 +16,15 @@ const (
 	DefaultAPIEndpoint = "https://api.inferable.ai"
 )
 
-type FunctionRegistry struct {
+type functionRegistry struct {
 	services map[string]*Service
 }
 
 type Inferable struct {
-	client           *Client
+	client           *client.Client
 	apiEndpoint      string
 	apiSecret        string
-	functionRegistry FunctionRegistry
+	functionRegistry functionRegistry
 	machineID        string
 	Default          *Service
 }
@@ -37,7 +39,7 @@ func New(options InferableOptions) (*Inferable, error) {
 	if options.APIEndpoint == "" {
 		options.APIEndpoint = DefaultAPIEndpoint
 	}
-	client, err := NewClient(ClientOptions{
+	client, err := client.NewClient(client.ClientOptions{
 		Endpoint: options.APIEndpoint,
 		Secret:   options.APISecret,
 	})
@@ -47,14 +49,14 @@ func New(options InferableOptions) (*Inferable, error) {
 
 	machineID := options.MachineID
 	if machineID == "" {
-		machineID = generateMachineID(8)
+		machineID = util.GenerateMachineID(8)
 	}
 
 	inferable := &Inferable{
 		client:           client,
 		apiEndpoint:      options.APIEndpoint,
 		apiSecret:        options.APISecret,
-		functionRegistry: FunctionRegistry{services: make(map[string]*Service)},
+		functionRegistry: functionRegistry{services: make(map[string]*Service)},
 		machineID:        machineID,
 	}
 
@@ -65,15 +67,6 @@ func New(options InferableOptions) (*Inferable, error) {
 	}
 
 	return inferable, nil
-}
-
-// Convenience reference to a service with name 'default'.
-func (i *Inferable) DefaultService() (*Service, error) {
-	if _, exists := i.functionRegistry.services["default"]; exists {
-		return i.functionRegistry.services["default"], nil
-	}
-
-	return nil, fmt.Errorf("default service not found")
 }
 
 func (i *Inferable) RegisterService(serviceName string) (*Service, error) {
@@ -89,7 +82,7 @@ func (i *Inferable) RegisterService(serviceName string) (*Service, error) {
 	return service, nil
 }
 
-func (i *Inferable) CallFunc(serviceName, funcName string, args ...interface{}) ([]reflect.Value, error) {
+func (i *Inferable) callFunc(serviceName, funcName string, args ...interface{}) ([]reflect.Value, error) {
 	service, exists := i.functionRegistry.services[serviceName]
 	if !exists {
 		return nil, fmt.Errorf("service with name '%s' not found", serviceName)
@@ -118,7 +111,7 @@ func (i *Inferable) CallFunc(serviceName, funcName string, args ...interface{}) 
 	return fnValue.Call(inArgs), nil
 }
 
-func (i *Inferable) ToJSONDefinition() ([]byte, error) {
+func (i *Inferable) toJSONDefinition() ([]byte, error) {
 	definitions := make([]map[string]interface{}, 0)
 
 	for serviceName, service := range i.functionRegistry.services {
@@ -143,7 +136,7 @@ func (i *Inferable) ToJSONDefinition() ([]byte, error) {
 	return json.MarshalIndent(definitions, "", "  ")
 }
 
-func (i *Inferable) FetchData(options FetchDataOptions) ([]byte, error) {
+func (i *Inferable) fetchData(options client.FetchDataOptions) ([]byte, error) {
 	// Add default Content-Type header if not present
 	if options.Headers == nil {
 		options.Headers = make(map[string]string)
@@ -156,12 +149,8 @@ func (i *Inferable) FetchData(options FetchDataOptions) ([]byte, error) {
 	return []byte(data), err
 }
 
-func (i *Inferable) GetMachineID() string {
-	return i.machineID
-}
-
-func (i *Inferable) ServerOk() error {
-	data, err := i.client.FetchData(FetchDataOptions{
+func (i *Inferable) serverOk() error {
+	data, err := i.client.FetchData(client.FetchDataOptions{
 		Path:   "/live",
 		Method: "GET",
 	})

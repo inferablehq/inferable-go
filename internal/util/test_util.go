@@ -1,11 +1,11 @@
-package inferable
+package util
 
 import (
 	"github.com/joho/godotenv"
 	"os"
 )
 
-func getTestVars() (string, string, string, string) {
+func GetTestVars() (string, string, string, string) {
 	if os.Getenv("INFERABLE_MACHINE_SECRET") == "" {
 		err := godotenv.Load("./.env")
 		if err != nil {
@@ -16,8 +16,9 @@ func getTestVars() (string, string, string, string) {
 	consumeSecret := os.Getenv("INFERABLE_CONSUME_SECRET")
 	clusterId := os.Getenv("INFERABLE_CLUSTER_ID")
 	apiEndpoint := os.Getenv("INFERABLE_API_ENDPOINT")
+
 	if apiEndpoint == "" {
-		apiEndpoint = DefaultAPIEndpoint
+    panic("INFERABLE_API_ENDPOINT is not available")
 	}
 	if machineSecret == "" {
 		panic("INFERABLE_MACHINE_SECRET is not available")

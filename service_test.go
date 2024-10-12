@@ -10,10 +10,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+  "github.com/inferablehq/inferable-go/internal/util"
 )
 
 func TestRegisterFunc(t *testing.T) {
-	_, _, _, apiEndpoint := getTestVars()
+	_, _, _, apiEndpoint := util.GetTestVars()
 
 	i, _ := New(InferableOptions{
 		APIEndpoint: apiEndpoint,
@@ -51,7 +53,7 @@ func TestRegisterFunc(t *testing.T) {
 }
 
 func TestRegistrationAndConfig(t *testing.T) {
-	machineSecret, _, _, apiEndpoint := getTestVars()
+	machineSecret, _, _, apiEndpoint := util.GetTestVars()
 
 	machineID := "random-machine-id"
 
@@ -94,7 +96,7 @@ func TestRegistrationAndConfig(t *testing.T) {
 }
 
 func TestErrorneousRegistration(t *testing.T) {
-	machineSecret, _, _, apiEndpoint := getTestVars()
+	machineSecret, _, _, apiEndpoint := util.GetTestVars()
 
 	machineID := "random-machine-id"
 
@@ -137,7 +139,7 @@ func TestErrorneousRegistration(t *testing.T) {
 }
 
 func TestServiceStartAndReceiveMessage(t *testing.T) {
-	machineSecret, consumeSecret, clusterId, apiEndpoint := getTestVars()
+	machineSecret, consumeSecret, clusterId, apiEndpoint := util.GetTestVars()
 
 	machineID := "random-machine-id"
 
