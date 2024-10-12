@@ -16,8 +16,8 @@ import (
 )
 
 const (
-  MaxConsecutivePollFailures = 50
-  DefaultRetryAfter = 10
+	MaxConsecutivePollFailures = 50
+	DefaultRetryAfter          = 10
 )
 
 type Function struct {
@@ -35,7 +35,7 @@ type service struct {
 	clusterId  string
 	ctx        context.Context
 	cancel     context.CancelFunc
-  retryAfter int
+	retryAfter int
 }
 
 type callMessage struct {
@@ -185,32 +185,32 @@ func (s *service) Start() error {
 	}
 
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-  s.retryAfter = 0
+	s.retryAfter = 0
 
-  go func() {
-    failureCount := DefaultRetryAfter
-    for {
-      time.Sleep(time.Duration(s.retryAfter) * time.Second)
+	go func() {
+		failureCount := DefaultRetryAfter
+		for {
+			time.Sleep(time.Duration(s.retryAfter) * time.Second)
 
-      select {
-      case <-s.ctx.Done():
-        return
-      default:
-        err := s.poll()
+			select {
+			case <-s.ctx.Done():
+				return
+			default:
+				err := s.poll()
 
-        if err != nil {
-          failureCount++
+				if err != nil {
+					failureCount++
 
-          if failureCount > MaxConsecutivePollFailures {
-            log.Printf("Too many consecutive poll failures, exiting service: %s", s.Name)
-            s.Stop()
-          }
+					if failureCount > MaxConsecutivePollFailures {
+						log.Printf("Too many consecutive poll failures, exiting service: %s", s.Name)
+						s.Stop()
+					}
 
-          log.Printf("Failed to poll: %v", err)
-        }
-      }
-    }
-  }()
+					log.Printf("Failed to poll: %v", err)
+				}
+			}
+		}
+	}()
 
 	log.Printf("Service '%s' started and polling for messages", s.Name)
 	return nil
@@ -243,17 +243,13 @@ func (s *service) poll() error {
 		return fmt.Errorf("failed to poll calls: %v", err)
 	}
 
-  // log headers
-  for k, v := range respHeaders {
-    log.Printf("%s: %s", k, v)
-  }
-  if retryAfter, ok := respHeaders["Retry-After"]; ok {
-    for _, v := range retryAfter {
-      if i, err := strconv.Atoi(v); err == nil {
-        s.retryAfter = i
-      }
-    }
-  }
+	if retryAfter, ok := respHeaders["Retry-After"]; ok {
+		for _, v := range retryAfter {
+			if i, err := strconv.Atoi(v); err == nil {
+				s.retryAfter = i
+			}
+		}
+	}
 
 	parsed := []callMessage{}
 
@@ -284,40 +280,39 @@ func (s *service) handleMessage(msg callMessage) error {
 		return fmt.Errorf("function not found: %s", msg.Function)
 	}
 
-  // Create a new instance of the function's input type
-  fnType := reflect.TypeOf(fn.Func)
-  argType := fnType.In(0)
-  argPtr := reflect.New(argType)
+	// Create a new instance of the function's input type
+	fnType := reflect.TypeOf(fn.Func)
+	argType := fnType.In(0)
+	argPtr := reflect.New(argType)
 
-  inputJson, err := json.Marshal(msg.Input)
+	inputJson, err := json.Marshal(msg.Input)
 
-  if err != nil {
-    return fmt.Errorf("failed to marshal input: %v", err)
-  }
+	if err != nil {
+		return fmt.Errorf("failed to marshal input: %v", err)
+	}
 
-  err = json.Unmarshal(inputJson, argPtr.Interface())
-  if err != nil {
-    return fmt.Errorf("failed to unmarshal input: %v", err)
-  }
-
+	err = json.Unmarshal(inputJson, argPtr.Interface())
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal input: %v", err)
+	}
 
 	start := time.Now()
 	// Call the function with the unmarshaled argument
 	fnValue := reflect.ValueOf(fn.Func)
 	returnValues := fnValue.Call([]reflect.Value{argPtr.Elem()})
 
-  resultType := "resolution"
-  resultValue := returnValues[0].Interface()
+	resultType := "resolution"
+	resultValue := returnValues[0].Interface()
 
-  // Check if ANY of the return values is an error
-  for _, v := range returnValues {
-    if v.Type().AssignableTo(reflect.TypeOf((*error)(nil)).Elem()) && v.Interface() != nil {
-      resultType = "rejection"
-      // Serialize the error
-      resultValue = v.Interface().(error).Error()
-      break
-    }
-  }
+	// Check if ANY of the return values is an error
+	for _, v := range returnValues {
+		if v.Type().AssignableTo(reflect.TypeOf((*error)(nil)).Elem()) && v.Interface() != nil {
+			resultType = "rejection"
+			// Serialize the error
+			resultValue = v.Interface().(error).Error()
+			break
+		}
+	}
 
 	result := result{
 		Result:     resultValue,
@@ -381,5 +376,5 @@ func (s *service) getSchema() (map[string]interface{}, error) {
 }
 
 func (s *service) isPolling() bool {
-  return s.cancel != nil
+	return s.cancel != nil
 }

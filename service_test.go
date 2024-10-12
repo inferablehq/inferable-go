@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-  "github.com/inferablehq/inferable-go/internal/util"
+	"github.com/inferablehq/inferable-go/internal/util"
 )
 
 func TestRegisterFunc(t *testing.T) {
@@ -210,7 +210,7 @@ func TestServiceStartAndReceiveMessage(t *testing.T) {
 	// Check if the job was executed successfully
 	require.Equal(t, "resolution", result["resultType"])
 	require.Equal(t, "success", result["status"])
-  require.Equal(t, "Received: Hello, SQS!", result["result"])
+	require.Equal(t, "Received: Hello, SQS!", result["result"])
 }
 
 func TestServiceStartAndReceiveFailingMessage(t *testing.T) {
@@ -235,7 +235,7 @@ func TestServiceStartAndReceiveFailingMessage(t *testing.T) {
 		Message string `json:"message"`
 	}
 
-  // Purposfuly failing function
+	// Purposfuly failing function
 	testFailingFunc := func(input TestInput) (*string, error) { return nil, fmt.Errorf("test error") }
 
 	err = service.RegisterFunc(Function{
@@ -286,5 +286,5 @@ func TestServiceStartAndReceiveFailingMessage(t *testing.T) {
 	// Check if the job was executed successfully
 	require.Equal(t, "rejection", result["resultType"])
 	require.Equal(t, "success", result["status"])
-  require.Equal(t, "test error", result["result"])
+	require.Equal(t, "test error", result["result"])
 }
