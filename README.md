@@ -1,4 +1,15 @@
-# Inferable Go Client
+<p align="center">
+  <img src="https://a.inferable.ai/logo.png?v=2" width="200" style="border-radius: 10px" />
+</p>
+
+# Go SDK for Inferable
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/inferablehq/inferable-go.svg)](https://pkg.go.dev/github.com/inferablehq/inferable-go)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Documentation](https://img.shields.io/badge/docs-inferable.ai-brightgreen)](https://docs.inferable.ai/)
+[![Go Report Card](https://goreportcard.com/badge/github.com/inferablehq/inferable-go)](https://goreportcard.com/report/github.com/inferablehq/inferable-go)
+
+# Go SDK for Inferable
 
 Inferable Go Client is a Go package that provides a client for interacting with the Inferable API. It allows you to register your go functions against the Inferable control plane.
 
