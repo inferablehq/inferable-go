@@ -277,7 +277,8 @@ func (s *service) handleMessage(msg callMessage) error {
 	// Find the target function
 	fn, ok := s.Functions[msg.Function]
 	if !ok {
-		return fmt.Errorf("function not found: %s", msg.Function)
+		log.Printf("Received call for unknown function: %s", msg.Function)
+    return nil
 	}
 
 	// Create a new instance of the function's input type
