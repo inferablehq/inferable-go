@@ -2,8 +2,6 @@
   <img src="https://a.inferable.ai/logo.png?v=2" width="200" style="border-radius: 10px" />
 </p>
 
-# Go SDK for Inferable
-
 [![Go Reference](https://pkg.go.dev/badge/github.com/inferablehq/inferable-go.svg)](https://pkg.go.dev/github.com/inferablehq/inferable-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation](https://img.shields.io/badge/docs-inferable.ai-brightgreen)](https://docs.inferable.ai/)
