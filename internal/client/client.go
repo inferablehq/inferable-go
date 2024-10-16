@@ -40,16 +40,16 @@ type FetchDataOptions struct {
 	Method      string
 }
 
-func (c *Client) FetchData(options FetchDataOptions) (string, http.Header, error) {
+func (c *Client) FetchData(options FetchDataOptions) (string, http.Header, error, int) {
 	fullURL := fmt.Sprintf("%s%s", c.endpoint, options.Path)
 
 	if !strings.HasPrefix(fullURL, "http://") && !strings.HasPrefix(fullURL, "https://") {
-		return "", nil, fmt.Errorf("invalid URL: %s", fullURL)
+		return "", nil, fmt.Errorf("invalid URL: %s", fullURL), -1
 	}
 
 	req, err := http.NewRequest(options.Method, fullURL, strings.NewReader(options.Body))
 	if err != nil {
-		return "", nil, fmt.Errorf("error creating request: %v", err)
+		return "", nil, fmt.Errorf("error creating request: %v", err), -1
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.secret)
@@ -73,18 +73,18 @@ func (c *Client) FetchData(options FetchDataOptions) (string, http.Header, error
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", nil, fmt.Errorf("error making request: %v", err)
+		return "", nil, fmt.Errorf("error making request: %v", err), resp.StatusCode
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, fmt.Errorf("error reading response: %v", err)
+		return "", nil, fmt.Errorf("error reading response: %v", err), resp.StatusCode
 	}
 
 	if resp.StatusCode >= 400 {
-		return "", resp.Header, fmt.Errorf("API error: %s (status code: %d)", string(body), resp.StatusCode)
+		return "", resp.Header, fmt.Errorf("API error: %s (status code: %d)", string(body), resp.StatusCode), resp.StatusCode
 	}
 
-	return string(body), resp.Header, nil
+	return string(body), resp.Header, nil, resp.StatusCode
 }

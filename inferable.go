@@ -138,7 +138,7 @@ func (i *Inferable) toJSONDefinition() ([]byte, error) {
 	return json.MarshalIndent(definitions, "", "  ")
 }
 
-func (i *Inferable) fetchData(options client.FetchDataOptions) ([]byte, http.Header, error) {
+func (i *Inferable) fetchData(options client.FetchDataOptions) ([]byte, http.Header, error, int) {
 	// Add default Content-Type header if not present
 	if options.Headers == nil {
 		options.Headers = make(map[string]string)
@@ -147,12 +147,12 @@ func (i *Inferable) fetchData(options client.FetchDataOptions) ([]byte, http.Hea
 		options.Headers["Content-Type"] = "application/json"
 	}
 
-	data, headers, err := i.client.FetchData(options)
-	return []byte(data), headers, err
+	data, headers, err, status:= i.client.FetchData(options)
+	return []byte(data), headers, err, status
 }
 
 func (i *Inferable) serverOk() error {
-	data, _, err := i.client.FetchData(client.FetchDataOptions{
+	data, _, err, _ := i.client.FetchData(client.FetchDataOptions{
 		Path:   "/live",
 		Method: "GET",
 	})

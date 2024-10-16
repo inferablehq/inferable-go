@@ -157,7 +157,7 @@ func (s *service) registerMachine() error {
 		Body:    string(jsonPayload),
 	}
 
-	responseData, _, err := s.inferable.fetchData(options)
+	responseData, _, err, _ := s.inferable.fetchData(options)
 	if err != nil {
 		return fmt.Errorf("failed to register machine: %v", err)
 	}
@@ -238,7 +238,12 @@ func (s *service) poll() error {
 		Headers: headers,
 	}
 
-	result, respHeaders, err := s.inferable.fetchData(options)
+	result, respHeaders, err, status := s.inferable.fetchData(options)
+
+  if status == 410 {
+    s.registerMachine()
+  }
+
 	if err != nil {
 		return fmt.Errorf("failed to poll calls: %v", err)
 	}
@@ -351,7 +356,7 @@ func (s *service) persistJobResult(jobID string, result result) error {
 		Body:    string(payloadJSON),
 	}
 
-	_, _, err = s.inferable.fetchData(options)
+	_, _, err, _ = s.inferable.fetchData(options)
 	if err != nil {
 		return fmt.Errorf("failed to persist job result: %v", err)
 	}
